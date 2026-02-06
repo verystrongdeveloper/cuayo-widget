@@ -1,8 +1,14 @@
-use tauri::Manager;
+use tauri::Window;
+
+#[tauri::command]
+fn start_drag(window: Window) -> Result<(), String> {
+  window.start_dragging().map_err(|error| error.to_string())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .invoke_handler(tauri::generate_handler![start_drag])
     .on_page_load(|window, payload| {
       println!("[speaki] loaded url: {} on {}", payload.url(), window.label());
     })
@@ -13,10 +19,6 @@ pub fn run() {
             .level(log::LevelFilter::Info)
             .build(),
         )?;
-
-        if let Some(window) = app.get_webview_window("main") {
-          window.open_devtools();
-        }
       }
       Ok(())
     })

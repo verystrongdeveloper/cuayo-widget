@@ -203,6 +203,13 @@
         return "./" + folder + "/" + encodeURIComponent(fileName);
       }
 
+      function invokeTauri(commandName, payload) {
+        if (!window.__TAURI_INTERNALS__ || typeof window.__TAURI_INTERNALS__.invoke !== "function") {
+          return Promise.reject(new Error("Tauri invoke is unavailable"));
+        }
+        return window.__TAURI_INTERNALS__.invoke(commandName, payload || {});
+      }
+
       function setGuide(text) {
         if (guide) {
           guide.textContent = text;
@@ -255,6 +262,12 @@
         setExpression(Math.floor(Math.random() * expressions.length), shouldPlayVoice);
       }
 
+      function startDesktopDrag() {
+        invokeTauri("start_drag").catch(function () {
+          setGuide("Drag command failed.");
+        });
+      }
+
       sprite.addEventListener("load", function () {
         widget.classList.remove("sprite-failed");
         const expression = expressions[expressionIndex];
@@ -282,7 +295,44 @@
 
       if (isTauriDesktop) {
         document.body.classList.add("desktop-widget-mode");
-        setGuide("Desktop widget mode. Click Speaki to change mood and voice.");
+        setGuide("Desktop widget mode. Drag Speaki to move.");
+
+        widget.addEventListener("pointerdown", function (event) {
+          if (event.button !== 0 && event.pointerType !== "touch") {
+            return;
+          }
+
+          state.pointerId = event.pointerId;
+          state.startX = event.clientX;
+          state.startY = event.clientY;
+          state.moved = false;
+        });
+
+        widget.addEventListener("pointermove", function (event) {
+          if (state.pointerId !== event.pointerId) {
+            return;
+          }
+
+          const deltaX = Math.abs(event.clientX - state.startX);
+          const deltaY = Math.abs(event.clientY - state.startY);
+          if (state.moved || (deltaX <= 5 && deltaY <= 5)) {
+            return;
+          }
+
+          state.moved = true;
+          state.suppressClickUntil = Date.now() + 250;
+          startDesktopDrag();
+        });
+
+        function clearDesktopPointer(event) {
+          if (state.pointerId !== event.pointerId) {
+            return;
+          }
+          state.pointerId = null;
+        }
+
+        widget.addEventListener("pointerup", clearDesktopPointer);
+        widget.addEventListener("pointercancel", clearDesktopPointer);
         return;
       }
 
