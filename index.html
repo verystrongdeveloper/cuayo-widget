@@ -91,6 +91,12 @@
       pointer-events: none;
       position: relative;
       z-index: 1;
+      transform-origin: center;
+      transition: transform 120ms linear;
+    }
+
+    .speaki-widget.facing-left img {
+      transform: scaleX(-1);
     }
 
     .speaki-widget.sprite-failed {
@@ -194,7 +200,8 @@
         startX: 0,
         startY: 0,
         moved: false,
-        suppressClickUntil: 0
+        suppressClickUntil: 0,
+        desktopAutoMoveLockUntil: 0
       };
       let expressionIndex = 0;
       let activeAudio = null;
@@ -214,6 +221,33 @@
         if (guide) {
           guide.textContent = text;
         }
+      }
+
+      function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+      }
+
+      function wait(ms) {
+        return new Promise(function (resolve) {
+          window.setTimeout(resolve, ms);
+        });
+      }
+
+      function setFacingByDelta(deltaX) {
+        if (deltaX < -1) {
+          widget.classList.add("facing-left");
+          return;
+        }
+        if (deltaX > 1) {
+          widget.classList.remove("facing-left");
+        }
+      }
+
+      function easeInOutQuad(t) {
+        if (t < 0.5) {
+          return 2 * t * t;
+        }
+        return 1 - Math.pow(-2 * t + 2, 2) / 2;
       }
 
       function randomItem(items) {
@@ -268,6 +302,57 @@
         });
       }
 
+      async function moveDesktopWindowRandomX() {
+        const geometry = await invokeTauri("get_window_geometry");
+        const maxX = geometry.monitor_x + Math.max(0, geometry.monitor_width - geometry.width);
+        const minX = geometry.monitor_x;
+        const targetX = Math.round(minX + Math.random() * (maxX - minX));
+        const startX = geometry.x;
+        const fixedY = clamp(
+          geometry.y,
+          geometry.monitor_y,
+          geometry.monitor_y + Math.max(0, geometry.monitor_height - geometry.height)
+        );
+        const distance = Math.abs(targetX - startX);
+        setFacingByDelta(targetX - startX);
+
+        if (distance < 12) {
+          return;
+        }
+
+        const duration = Math.min(1500, Math.max(450, distance * 2.1));
+        const steps = Math.max(10, Math.round(duration / 35));
+
+        for (let step = 1; step <= steps; step += 1) {
+          if (Date.now() < state.desktopAutoMoveLockUntil) {
+            return;
+          }
+
+          const progress = step / steps;
+          const eased = easeInOutQuad(progress);
+          const nextX = Math.round(startX + (targetX - startX) * eased);
+          await invokeTauri("set_window_position", { x: nextX, y: fixedY });
+          await wait(16);
+        }
+      }
+
+      async function startDesktopHorizontalWander() {
+        while (true) {
+          const nextWait = Math.round(1100 + Math.random() * 2600);
+          await wait(nextWait);
+
+          if (Date.now() < state.desktopAutoMoveLockUntil) {
+            continue;
+          }
+
+          try {
+            await moveDesktopWindowRandomX();
+          } catch (_error) {
+            await wait(1000);
+          }
+        }
+      }
+
       sprite.addEventListener("load", function () {
         widget.classList.remove("sprite-failed");
         const expression = expressions[expressionIndex];
@@ -295,7 +380,8 @@
 
       if (isTauriDesktop) {
         document.body.classList.add("desktop-widget-mode");
-        setGuide("Desktop widget mode. Drag Speaki to move.");
+        setGuide("Desktop mode: free drag + random horizontal movement.");
+        state.desktopAutoMoveLockUntil = Date.now() + 1500;
 
         widget.addEventListener("pointerdown", function (event) {
           if (event.button !== 0 && event.pointerType !== "touch") {
@@ -306,6 +392,7 @@
           state.startX = event.clientX;
           state.startY = event.clientY;
           state.moved = false;
+          state.desktopAutoMoveLockUntil = Date.now() + 4500;
         });
 
         widget.addEventListener("pointermove", function (event) {
@@ -313,8 +400,10 @@
             return;
           }
 
-          const deltaX = Math.abs(event.clientX - state.startX);
+          const signedDeltaX = event.clientX - state.startX;
+          const deltaX = Math.abs(signedDeltaX);
           const deltaY = Math.abs(event.clientY - state.startY);
+          setFacingByDelta(signedDeltaX);
           if (state.moved || (deltaX <= 5 && deltaY <= 5)) {
             return;
           }
@@ -333,15 +422,12 @@
 
         widget.addEventListener("pointerup", clearDesktopPointer);
         widget.addEventListener("pointercancel", clearDesktopPointer);
+        startDesktopHorizontalWander();
         return;
       }
 
       widget.classList.add("browser-draggable");
       setGuide("Browser mode. Drag to move, double-click to reset, click to change mood.");
-
-      function clamp(value, min, max) {
-        return Math.min(Math.max(value, min), max);
-      }
 
       function bounds() {
         return {
@@ -424,8 +510,10 @@
           return;
         }
 
-        const deltaX = Math.abs(event.clientX - state.startX);
+        const signedDeltaX = event.clientX - state.startX;
+        const deltaX = Math.abs(signedDeltaX);
         const deltaY = Math.abs(event.clientY - state.startY);
+        setFacingByDelta(signedDeltaX);
         if (deltaX > 5 || deltaY > 5) {
           state.moved = true;
         }
