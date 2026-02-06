@@ -1,0 +1,31 @@
+{
+  "build": {
+    "beforeDevCommand": "npm run web:dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../web"
+  },
+  "app": {
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "Speaki Widget",
+        "width": 340,
+        "height": 340,
+        "minWidth": 240,
+        "minHeight": 240,
+        "resizable": false,
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "center": true,
+        "dragDropEnabled": false
+      }
+    ]
+  }
+}

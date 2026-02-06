@@ -1,0 +1,25 @@
+
+> cuayo-widget@0.1.0 dev
+> set "PATH=%USERPROFILE%\.cargo\bin;%PATH%" && tauri dev --config src-tauri/tauri.dev.conf.json
+
+     Running BeforeDevCommand (`npm run web:dev`)
+
+> cuayo-widget@0.1.0 web:dev
+> http-server ./web -a 127.0.0.1 -p 1420 -c-1 --silent
+
+     Running DevCommand (`cargo  run --no-default-features --color always --`)
+        Info Watching C:\Users\gnh09\Desktop\project\cuayo-widget\src-tauri for changes...
+[1m[92m   Compiling[0m app v0.1.0 (C:\Users\gnh09\Desktop\project\cuayo-widget\src-tauri)
+[1m[96m    Building[0m [=======================> ] 397/399: app     [1m[96m    Building[0m [=======================> ] 398/399: app(bin)                                                            [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 8.54s
+[1m[92m     Running[0m `target\debug\app.exe`
+(node:333672) [DEP0066] DeprecationWarning: OutgoingMessage.prototype._headers is deprecated
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[speaki] loaded url: http://127.0.0.1:1420/ on main
+[speaki] loaded url: http://127.0.0.1:1420/ on main
+        Info File src-tauri\tauri.dev.conf.json changed. Rebuilding application...
+     Running DevCommand (`cargo  run --no-default-features --color always --`)
+[1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 0.81s
+[1m[92m     Running[0m `target\debug\app.exe`
+[speaki] loaded url: http://127.0.0.1:1420/ on main
+[speaki] loaded url: http://127.0.0.1:1420/ on main
+[1m[91merror[0m: process didn't exit successfully: `target\debug\app.exe` (exit code: 0xffffffff)

@@ -1,0 +1,416 @@
+﻿<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Speaki Widget</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    }
+
+    .stage {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .guide {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      color: #1f2937;
+      font-size: 12px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.16);
+      z-index: 20;
+      user-select: none;
+    }
+
+    .desktop-widget-mode .guide {
+      display: none;
+    }
+
+    .desktop-widget-mode .speaki-widget {
+      left: 50%;
+      top: 50%;
+      right: auto;
+      bottom: auto;
+      width: min(320px, calc(100vw - 16px));
+      transform: translate(-50%, -50%);
+    }
+
+    .speaki-widget {
+      position: absolute;
+      right: 8px;
+      bottom: 8px;
+      width: min(280px, calc(100vw - 16px));
+      z-index: 10;
+      user-select: none;
+      -webkit-user-drag: none;
+      touch-action: none;
+      cursor: grab;
+      filter: drop-shadow(0 12px 20px rgba(0, 0, 0, 0.28));
+      animation: show-up 0.45s ease-out;
+    }
+
+    .speaki-widget::before {
+      content: "";
+      position: absolute;
+      left: 12%;
+      right: 12%;
+      bottom: 4%;
+      height: 18%;
+      border-radius: 999px;
+      background: radial-gradient(circle at center, rgba(255, 209, 220, 0.55), rgba(255, 209, 220, 0));
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    .speaki-widget.dragging {
+      cursor: grabbing;
+      filter: drop-shadow(0 16px 26px rgba(0, 0, 0, 0.35));
+    }
+
+    .speaki-widget img {
+      display: block;
+      width: 100%;
+      height: auto;
+      pointer-events: none;
+      position: relative;
+      z-index: 1;
+    }
+
+    .speaki-widget.sprite-failed {
+      width: 220px;
+      height: 220px;
+      border-radius: 999px;
+      border: 2px solid rgba(251, 113, 133, 0.9);
+      background: linear-gradient(145deg, rgba(255, 228, 234, 0.96), rgba(255, 244, 246, 0.96));
+      box-shadow: 0 10px 22px rgba(190, 24, 93, 0.2);
+    }
+
+    .speaki-widget.sprite-failed img {
+      display: none;
+    }
+
+    .browser-draggable {
+      position: fixed;
+      left: 0;
+      top: 0;
+      right: auto;
+      bottom: auto;
+    }
+
+    @keyframes show-up {
+      from {
+        opacity: 0;
+        transform: translateY(10px) scale(0.97);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <div class="guide">Click Speaki: next mood + voice. Right-click: random mood.</div>
+    <div id="speakiWidget" class="speaki-widget" data-tauri-drag-region aria-label="Speaki widget">
+      <img src="./images/speaki_smile.png" alt="Speaki character" draggable="false" />
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      const widget = document.getElementById("speakiWidget");
+      const sprite = widget.querySelector("img");
+      const guide = document.querySelector(".guide");
+      const storageKey = "speaki-widget-position-v1";
+      const margin = 8;
+      const isTauriDesktop = Boolean(window.__TAURI_INTERNALS__);
+      const expressions = [
+        {
+          id: "smile",
+          label: "Smile",
+          sprite: "speaki_smile.png",
+          voices: ["like.WAV", "like2.WAV", "like3.WAV", "speeky.WAV"]
+        },
+        {
+          id: "smile2",
+          label: "Happy",
+          sprite: "speaki_smile2.png",
+          voices: ["like2.WAV", "like3.WAV", "clean.WAV"]
+        },
+        {
+          id: "eating",
+          label: "Eating",
+          sprite: "speaki_eating.png",
+          voices: ["I like pumpkin.WAV", "clean.WAV"]
+        },
+        {
+          id: "back",
+          label: "Back",
+          sprite: "speaki_back.png",
+          voices: ["kakurenbo.WAV", "speeky.WAV"]
+        },
+        {
+          id: "crying",
+          label: "Crying",
+          sprite: "speaki_crying.png",
+          voices: ["eww.WAV", "eww2.WAV", "don't push.WAV"]
+        },
+        {
+          id: "crying2",
+          label: "Sad",
+          sprite: "speaki_crying2.png",
+          voices: ["eww2.WAV", "don't push.WAV"]
+        },
+        {
+          id: "crying3",
+          label: "Tired",
+          sprite: "speaki_crying3.png",
+          voices: ["eww.WAV", "clean.WAV"]
+        }
+      ];
+      const state = {
+        dragging: false,
+        pointerId: null,
+        dragOffsetX: 0,
+        dragOffsetY: 0,
+        startX: 0,
+        startY: 0,
+        moved: false,
+        suppressClickUntil: 0
+      };
+      let expressionIndex = 0;
+      let activeAudio = null;
+
+      function assetPath(folder, fileName) {
+        return "./" + folder + "/" + encodeURIComponent(fileName);
+      }
+
+      function setGuide(text) {
+        if (guide) {
+          guide.textContent = text;
+        }
+      }
+
+      function randomItem(items) {
+        return items[Math.floor(Math.random() * items.length)];
+      }
+
+      function stopAudio() {
+        if (!activeAudio) {
+          return;
+        }
+
+        activeAudio.pause();
+        activeAudio.currentTime = 0;
+        activeAudio = null;
+      }
+
+      function playVoice(fileName) {
+        if (!fileName) {
+          return;
+        }
+
+        stopAudio();
+        activeAudio = new Audio(assetPath("voice", fileName));
+        activeAudio.volume = 0.9;
+        activeAudio.play().catch(function () {
+          setGuide("Audio blocked by system. Click Speaki again.");
+        });
+      }
+
+      function setExpression(nextIndex, shouldPlayVoice) {
+        expressionIndex = (nextIndex + expressions.length) % expressions.length;
+        const expression = expressions[expressionIndex];
+        sprite.src = assetPath("images", expression.sprite);
+        sprite.alt = "Speaki " + expression.label;
+
+        if (shouldPlayVoice) {
+          playVoice(randomItem(expression.voices));
+        }
+      }
+
+      function nextExpression(shouldPlayVoice) {
+        setExpression(expressionIndex + 1, shouldPlayVoice);
+      }
+
+      function randomExpression(shouldPlayVoice) {
+        setExpression(Math.floor(Math.random() * expressions.length), shouldPlayVoice);
+      }
+
+      sprite.addEventListener("load", function () {
+        widget.classList.remove("sprite-failed");
+        const expression = expressions[expressionIndex];
+        setGuide("Mode: " + expression.label + " (" + (expressionIndex + 1) + "/" + expressions.length + ")");
+      });
+
+      sprite.addEventListener("error", function () {
+        widget.classList.add("sprite-failed");
+        setGuide("Sprite load failed: " + sprite.getAttribute("src"));
+      });
+
+      widget.addEventListener("click", function () {
+        if (Date.now() < state.suppressClickUntil) {
+          return;
+        }
+        nextExpression(true);
+      });
+
+      widget.addEventListener("contextmenu", function (event) {
+        event.preventDefault();
+        randomExpression(true);
+      });
+
+      setExpression(0, false);
+
+      if (isTauriDesktop) {
+        document.body.classList.add("desktop-widget-mode");
+        setGuide("Desktop widget mode. Click Speaki to change mood and voice.");
+        return;
+      }
+
+      widget.classList.add("browser-draggable");
+      setGuide("Browser mode. Drag to move, double-click to reset, click to change mood.");
+
+      function clamp(value, min, max) {
+        return Math.min(Math.max(value, min), max);
+      }
+
+      function bounds() {
+        return {
+          minX: margin,
+          minY: margin,
+          maxX: Math.max(margin, window.innerWidth - widget.offsetWidth - margin),
+          maxY: Math.max(margin, window.innerHeight - widget.offsetHeight - margin)
+        };
+      }
+
+      function setPosition(x, y) {
+        const b = bounds();
+        const safeX = clamp(x, b.minX, b.maxX);
+        const safeY = clamp(y, b.minY, b.maxY);
+        widget.style.left = safeX + "px";
+        widget.style.top = safeY + "px";
+      }
+
+      function currentPosition() {
+        return {
+          x: parseFloat(widget.style.left) || 0,
+          y: parseFloat(widget.style.top) || 0
+        };
+      }
+
+      function savePosition() {
+        localStorage.setItem(storageKey, JSON.stringify(currentPosition()));
+      }
+
+      function resetToDefault() {
+        const b = bounds();
+        setPosition(b.maxX, b.maxY);
+        savePosition();
+      }
+
+      function loadPosition() {
+        try {
+          const raw = localStorage.getItem(storageKey);
+          if (!raw) {
+            resetToDefault();
+            return;
+          }
+
+          const pos = JSON.parse(raw);
+          if (typeof pos.x !== "number" || typeof pos.y !== "number") {
+            resetToDefault();
+            return;
+          }
+
+          setPosition(pos.x, pos.y);
+        } catch (_error) {
+          resetToDefault();
+        }
+      }
+
+      widget.addEventListener("dragstart", function (event) {
+        event.preventDefault();
+      });
+
+      widget.addEventListener("pointerdown", function (event) {
+        if (event.button !== 0 && event.pointerType !== "touch") {
+          return;
+        }
+
+        const pos = currentPosition();
+        state.dragging = true;
+        state.pointerId = event.pointerId;
+        state.dragOffsetX = event.clientX - pos.x;
+        state.dragOffsetY = event.clientY - pos.y;
+        state.startX = event.clientX;
+        state.startY = event.clientY;
+        state.moved = false;
+
+        widget.classList.add("dragging");
+        widget.setPointerCapture(event.pointerId);
+      });
+
+      widget.addEventListener("pointermove", function (event) {
+        if (!state.dragging || state.pointerId !== event.pointerId) {
+          return;
+        }
+
+        const deltaX = Math.abs(event.clientX - state.startX);
+        const deltaY = Math.abs(event.clientY - state.startY);
+        if (deltaX > 5 || deltaY > 5) {
+          state.moved = true;
+        }
+
+        setPosition(event.clientX - state.dragOffsetX, event.clientY - state.dragOffsetY);
+      });
+
+      function stopDrag(event) {
+        if (!state.dragging || state.pointerId !== event.pointerId) {
+          return;
+        }
+
+        state.dragging = false;
+        state.pointerId = null;
+        widget.classList.remove("dragging");
+        widget.releasePointerCapture(event.pointerId);
+        if (state.moved) {
+          state.suppressClickUntil = Date.now() + 150;
+        }
+        savePosition();
+      }
+
+      widget.addEventListener("pointerup", stopDrag);
+      widget.addEventListener("pointercancel", stopDrag);
+      widget.addEventListener("dblclick", resetToDefault);
+
+      window.addEventListener("resize", function () {
+        const pos = currentPosition();
+        setPosition(pos.x, pos.y);
+        savePosition();
+      });
+
+      window.addEventListener("load", loadPosition);
+    })();
+  </script>
+</body>
+</html>
+

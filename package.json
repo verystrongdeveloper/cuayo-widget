@@ -1,0 +1,15 @@
+{
+  "name": "cuayo-widget",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "web:dev": "http-server ./web -a 127.0.0.1 -p 1420 -c-1 --silent",
+    "dev": "set \"PATH=%USERPROFILE%\\.cargo\\bin;%PATH%\" && tauri dev --config src-tauri/tauri.dev.conf.json",
+    "build": "set \"PATH=%USERPROFILE%\\.cargo\\bin;%PATH%\" && tauri build",
+    "tauri": "set \"PATH=%USERPROFILE%\\.cargo\\bin;%PATH%\" && tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.0",
+    "http-server": "^14.1.1"
+  }
+}
