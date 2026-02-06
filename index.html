@@ -326,6 +326,7 @@
 
         let currentX = safeStartX;
         let stepCount = 0;
+        let hop = null;
         while (Math.abs(targetX - currentX) > 0) {
           if (Date.now() < state.desktopAutoMoveLockUntil) {
             return;
@@ -336,7 +337,25 @@
           const moveSign = targetX > currentX ? 1 : -1;
           currentX = clamp(currentX + moveSign * stride, minX, maxX);
 
-          await invokeTauri("set_window_position", { x: currentX, y: fixedY });
+          if (!hop && Math.random() < 0.14) {
+            hop = {
+              frame: 0,
+              totalFrames: Math.round(8 + Math.random() * 6),
+              height: Math.round(8 + Math.random() * 12)
+            };
+          }
+
+          let yOffset = 0;
+          if (hop) {
+            const phase = hop.frame / hop.totalFrames;
+            yOffset = Math.round(Math.sin(phase * Math.PI) * hop.height);
+            hop.frame += 1;
+            if (hop.frame > hop.totalFrames) {
+              hop = null;
+            }
+          }
+
+          await invokeTauri("set_window_position", { x: currentX, y: fixedY - yOffset });
           stepCount += 1;
 
           const baseDelay = 12 + Math.random() * 10;
