@@ -243,13 +243,6 @@
         }
       }
 
-      function easeInOutQuad(t) {
-        if (t < 0.5) {
-          return 2 * t * t;
-        }
-        return 1 - Math.pow(-2 * t + 2, 2) / 2;
-      }
-
       function randomItem(items) {
         return items[Math.floor(Math.random() * items.length)];
       }
@@ -306,33 +299,52 @@
         const geometry = await invokeTauri("get_window_geometry");
         const maxX = geometry.monitor_x + Math.max(0, geometry.monitor_width - geometry.width);
         const minX = geometry.monitor_x;
-        const targetX = Math.round(minX + Math.random() * (maxX - minX));
-        const startX = geometry.x;
+        const safeStartX = clamp(geometry.x, minX, maxX);
         const fixedY = clamp(
           geometry.y,
           geometry.monitor_y,
           geometry.monitor_y + Math.max(0, geometry.monitor_height - geometry.height)
         );
-        const distance = Math.abs(targetX - startX);
-        setFacingByDelta(targetX - startX);
 
-        if (distance < 12) {
+        let direction = Math.random() < 0.5 ? -1 : 1;
+        if (safeStartX <= minX + 12) {
+          direction = 1;
+        } else if (safeStartX >= maxX - 12) {
+          direction = -1;
+        }
+
+        const maxTravel = Math.max(40, Math.round((maxX - minX) * 0.6));
+        const desiredDistance = Math.round(90 + Math.random() * maxTravel);
+        const rawTargetX = safeStartX + direction * desiredDistance;
+        const targetX = clamp(rawTargetX, minX, maxX);
+        const totalDistance = Math.abs(targetX - safeStartX);
+        setFacingByDelta(targetX - safeStartX);
+
+        if (totalDistance < 8) {
           return;
         }
 
-        const duration = Math.min(1500, Math.max(450, distance * 2.1));
-        const steps = Math.max(10, Math.round(duration / 35));
-
-        for (let step = 1; step <= steps; step += 1) {
+        let currentX = safeStartX;
+        let stepCount = 0;
+        while (Math.abs(targetX - currentX) > 0) {
           if (Date.now() < state.desktopAutoMoveLockUntil) {
             return;
           }
 
-          const progress = step / steps;
-          const eased = easeInOutQuad(progress);
-          const nextX = Math.round(startX + (targetX - startX) * eased);
-          await invokeTauri("set_window_position", { x: nextX, y: fixedY });
-          await wait(16);
+          const remaining = Math.abs(targetX - currentX);
+          const stride = Math.min(remaining, Math.round(4 + Math.random() * 6));
+          const moveSign = targetX > currentX ? 1 : -1;
+          currentX = clamp(currentX + moveSign * stride, minX, maxX);
+
+          await invokeTauri("set_window_position", { x: currentX, y: fixedY });
+          stepCount += 1;
+
+          const baseDelay = 12 + Math.random() * 10;
+          await wait(Math.round(baseDelay));
+
+          if (stepCount % 5 === 0 && Math.random() < 0.3) {
+            await wait(Math.round(18 + Math.random() * 24));
+          }
         }
       }
 
