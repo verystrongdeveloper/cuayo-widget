@@ -212,7 +212,7 @@ fn try_start_follow_worker<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
 fn start_drag(window: Window) -> Result<(), String> {
   window.start_dragging().map_err(|error| error.to_string())?;
 
-  if window.label() == "pumpkin" && !is_pumpkin_chase_timed_out() {
+  if window.label() == "pumpkin" {
     set_pumpkin_dragging_state(true);
     try_start_follow_worker(window.app_handle().clone());
   }
@@ -634,10 +634,6 @@ fn follow_main_toward_pumpkin_windows<R: tauri::Runtime>(
   const FOLLOW_RATIO: f64 = 0.18;
   const MAX_STEP: i32 = 8;
 
-  if is_pumpkin_chase_timed_out() {
-    return Ok(());
-  }
-
   let pumpkin_pos = pumpkin_window.outer_position().map_err(|error| error.to_string())?;
   let pumpkin_size = pumpkin_window.outer_size().map_err(|error| error.to_string())?;
   let main_pos = main_window.outer_position().map_err(|error| error.to_string())?;
@@ -649,6 +645,11 @@ fn follow_main_toward_pumpkin_windows<R: tauri::Runtime>(
   let pumpkin_h = pumpkin_size.height as i32;
   let main_w = main_size.width as i32;
   let main_h = main_size.height as i32;
+
+  if is_pumpkin_chase_timed_out() {
+    let _ = close_dragging_pumpkin_if_touching(pumpkin_window, main_pos.x, main_pos.y, main_w, main_h);
+    return Ok(());
+  }
 
   if close_dragging_pumpkin_if_touching(pumpkin_window, main_pos.x, main_pos.y, main_w, main_h) {
     return Ok(());
@@ -730,9 +731,6 @@ fn follow_main_toward_pumpkin_windows<R: tauri::Runtime>(
 
 #[tauri::command]
 fn start_pumpkin_drag(window: Window) {
-  if is_pumpkin_chase_timed_out() {
-    return;
-  }
   set_pumpkin_dragging_state(true);
   try_start_follow_worker(window.app_handle().clone());
 }

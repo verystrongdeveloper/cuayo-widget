@@ -381,7 +381,8 @@
         desktopDragArmed: false,
         desktopDragHoldTimer: null,
         settingsOpen: false,
-        exiting: false
+        exiting: false,
+        sulking: false
       };
       let expressionIndex = 0;
       let activeAudio = null;
@@ -468,6 +469,7 @@
         state.dragging = false;
         state.desktopPointerDown = false;
         state.desktopDragArmed = false;
+        state.sulking = true;
         setDraggingVisual(false);
         if (forcedDragExpressionIndex >= 0) {
           setExpression(forcedDragExpressionIndex, false);
@@ -498,7 +500,12 @@
             })
             .then(function (isEaten) {
               if (isEaten) {
-                playVoice("I like pumpkin.WAV");
+                if (state.sulking) {
+                  state.sulking = false;
+                  playVoice("like3.WAV");
+                } else {
+                  playVoice("I like pumpkin.WAV");
+                }
               }
             })
             .catch(function () {
