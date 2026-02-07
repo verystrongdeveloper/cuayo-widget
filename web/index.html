@@ -390,6 +390,9 @@
       const forcedDragExpressionIndex = expressions.findIndex(function (expression) {
         return expression.id === "crying";
       });
+      const smileExpressionIndex = expressions.findIndex(function (expression) {
+        return expression.id === "smile2";
+      });
       const dragVoices = ["eww.WAV", "eww2.WAV"];
 
       function assetPath(folder, fileName) {
@@ -502,6 +505,7 @@
               if (isEaten) {
                 if (state.sulking) {
                   state.sulking = false;
+                  setExpression(smileExpressionIndex >= 0 ? smileExpressionIndex : 0, false);
                   playVoice("like3.WAV");
                 } else {
                   playVoice("I like pumpkin.WAV");
