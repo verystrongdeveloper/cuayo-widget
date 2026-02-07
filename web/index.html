@@ -325,7 +325,7 @@
           id: "smile",
           label: "Smile",
           sprite: "speaki_smile.png",
-          voices: ["like.WAV", "like2.WAV", "like3.WAV", "speeky.WAV"]
+          voices: ["like.WAV", "like2.WAV", "like3.WAV", "speaki.WAV"]
         },
         {
           id: "smile2",
@@ -343,7 +343,7 @@
           id: "back",
           label: "Back",
           sprite: "speaki_back.png",
-          voices: ["kakurenbo.WAV", "speeky.WAV"]
+          voices: ["kakurenbo.WAV", "speaki.WAV"]
         },
         {
           id: "crying",
@@ -398,6 +398,7 @@
       let desktopLastWindowX = null;
       let hungerDrainTimer = null;
       let eatingExpressionTimer = null;
+      let satiatedExpressionTimer = null;
       const desktopDragHoldMs = 260;
       const hungerDrainTickMs = 6000;
       const forcedDragExpressionIndex = expressions.findIndex(function (expression) {
@@ -418,6 +419,17 @@
       const eatingExpressionIndex = expressions.findIndex(function (expression) {
         return expression.id === "eating";
       });
+      const randomSatiatedExpressionIndexes = expressions
+        .map(function (_expression, index) {
+          return index;
+        })
+        .filter(function (index) {
+          const expression = expressions[index];
+          return expression.id !== "crying" &&
+            expression.id !== "crying2" &&
+            expression.id !== "crying3" &&
+            expression.id !== "eating";
+        });
       const dragVoices = ["eww.WAV", "eww2.WAV"];
       const satiatedClickVoices = [
         "clean.WAV",
@@ -425,8 +437,9 @@
         "like.WAV",
         "like2.WAV",
         "like3.WAV",
-        "speeky.WAV"
+        "speaki.WAV"
       ];
+      const hungerMilestones = [50, 30, 10];
 
       function assetPath(folder, fileName) {
         return "./" + folder + "/" + encodeURIComponent(fileName);
@@ -503,9 +516,11 @@
             return;
           }
 
+          const previousHunger = state.hunger;
           state.hunger = Math.max(0, state.hunger - 1);
           updateHungerDisplay();
           saveHunger();
+          maybePlayHungerMilestoneVoice(previousHunger, state.hunger);
           applyHungerDefaultExpression();
         }, hungerDrainTickMs);
       }
@@ -523,10 +538,82 @@
         return smileExpressionIndex >= 0 ? smileExpressionIndex : 0;
       }
 
+      function isSatiatedExpression(index) {
+        return randomSatiatedExpressionIndexes.indexOf(index) >= 0;
+      }
+
+      function randomSatiatedExpressionIndex() {
+        if (randomSatiatedExpressionIndexes.length === 0) {
+          return smileExpressionIndex >= 0 ? smileExpressionIndex : 0;
+        }
+
+        const filtered = randomSatiatedExpressionIndexes.filter(function (index) {
+          return index !== expressionIndex;
+        });
+        const pool = filtered.length > 0 ? filtered : randomSatiatedExpressionIndexes;
+        return randomItem(pool);
+      }
+
+      function stopSatiatedExpressionShuffle() {
+        if (satiatedExpressionTimer !== null) {
+          window.clearTimeout(satiatedExpressionTimer);
+          satiatedExpressionTimer = null;
+        }
+      }
+
+      function scheduleNextSatiatedExpressionShuffle() {
+        if (state.exiting || state.hunger <= 50 || state.sulking) {
+          stopSatiatedExpressionShuffle();
+          return;
+        }
+
+        const delayMs = Math.round(4500 + Math.random() * 5000);
+        satiatedExpressionTimer = window.setTimeout(function () {
+          satiatedExpressionTimer = null;
+          if (
+            state.exiting ||
+            state.hunger <= 50 ||
+            state.sulking ||
+            state.dragging ||
+            state.dragExpressionIndex !== null ||
+            eatingExpressionTimer !== null
+          ) {
+            scheduleNextSatiatedExpressionShuffle();
+            return;
+          }
+
+          const nextIndex = randomSatiatedExpressionIndex();
+          if (nextIndex !== expressionIndex) {
+            setExpression(nextIndex, false);
+          }
+          scheduleNextSatiatedExpressionShuffle();
+        }, delayMs);
+      }
+
+      function startSatiatedExpressionShuffle() {
+        if (satiatedExpressionTimer !== null) {
+          return;
+        }
+        scheduleNextSatiatedExpressionShuffle();
+      }
+
       function applyHungerDefaultExpression() {
         if (state.exiting || state.sulking || state.dragging || state.dragExpressionIndex !== null) {
           return;
         }
+
+        if (state.hunger > 50) {
+          startSatiatedExpressionShuffle();
+          if (!isSatiatedExpression(expressionIndex)) {
+            const nextIndex = randomSatiatedExpressionIndex();
+            if (nextIndex !== expressionIndex) {
+              setExpression(nextIndex, false);
+            }
+          }
+          return;
+        }
+
+        stopSatiatedExpressionShuffle();
 
         const targetIndex = hungerDefaultExpressionIndex();
         if (targetIndex !== expressionIndex) {
@@ -694,7 +781,21 @@
         playVoice(randomItem(satiatedClickVoices));
       }
 
+      function maybePlayHungerMilestoneVoice(previousHunger, nextHunger) {
+        if (previousHunger === nextHunger) {
+          return false;
+        }
+
+        if (hungerMilestones.indexOf(nextHunger) >= 0) {
+          playVoice("speaki.WAV");
+          return true;
+        }
+
+        return false;
+      }
+
       function onPumpkinTimeout() {
+        stopSatiatedExpressionShuffle();
         clearEatingExpressionTimer();
         clearDesktopDragHoldTimer();
         state.dragging = false;
@@ -732,14 +833,19 @@
             .then(function (isEaten) {
               if (isEaten) {
                 state.desktopAutoMoveLockUntil = Date.now() + 120;
+                const previousHunger = state.hunger;
                 state.hunger = Math.min(100, state.hunger + 10);
                 updateHungerDisplay();
                 saveHunger();
-                if (state.sulking) {
-                  state.sulking = false;
-                  playVoice("like3.WAV");
-                } else {
-                  playVoice("I like pumpkin.WAV");
+                const milestonePlayed = maybePlayHungerMilestoneVoice(previousHunger, state.hunger);
+                const wasSulking = state.sulking;
+                state.sulking = false;
+                if (!milestonePlayed) {
+                  if (wasSulking) {
+                    playVoice("like3.WAV");
+                  } else {
+                    playVoice("I like pumpkin.WAV");
+                  }
                 }
                 showEatingExpressionBriefly();
                 moveDesktopWindowRandomX().catch(function () {
@@ -938,6 +1044,7 @@
         }
 
         state.exiting = true;
+        stopSatiatedExpressionShuffle();
         clearEatingExpressionTimer();
         saveHunger();
         stopHungerDrain();
