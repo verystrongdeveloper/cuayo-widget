@@ -257,12 +257,32 @@ fn close_pumpkin_if_touching(
   );
 
   if touching {
-    let _ = pumpkin_window.close();
-    on_pumpkin_eaten();
+    consume_pumpkin_window(&pumpkin_window);
     return true;
   }
 
   false
+}
+
+fn consume_pumpkin_window<R: tauri::Runtime>(pumpkin_window: &tauri::WebviewWindow<R>) {
+  let _ = pumpkin_window.hide();
+  let _ = pumpkin_window.close();
+
+  let app = pumpkin_window.app_handle().clone();
+  let label = pumpkin_window.label().to_string();
+  thread::spawn(move || {
+    for _ in 0..24 {
+      let Some(next_window) = app.get_webview_window(&label) else {
+        break;
+      };
+      if next_window.close().is_ok() {
+        break;
+      }
+      thread::sleep(Duration::from_millis(16));
+    }
+  });
+
+  on_pumpkin_eaten();
 }
 
 fn close_dragging_pumpkin_if_touching<R: tauri::Runtime>(
@@ -291,8 +311,7 @@ fn close_dragging_pumpkin_if_touching<R: tauri::Runtime>(
   );
 
   if touching {
-    let _ = pumpkin_window.close();
-    on_pumpkin_eaten();
+    consume_pumpkin_window(pumpkin_window);
     return true;
   }
 
