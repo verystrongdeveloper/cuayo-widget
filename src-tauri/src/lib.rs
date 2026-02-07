@@ -1,9 +1,83 @@
 use serde::Serialize;
 use std::{
+  sync::{Mutex, OnceLock},
   thread,
   time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, Window};
+
+static PUMPKIN_DRAGGING: OnceLock<Mutex<bool>> = OnceLock::new();
+static FOLLOW_PHASE: OnceLock<Mutex<u8>> = OnceLock::new();
+static FOLLOW_WORKER_RUNNING: OnceLock<Mutex<bool>> = OnceLock::new();
+
+fn pumpkin_dragging_state() -> &'static Mutex<bool> {
+  PUMPKIN_DRAGGING.get_or_init(|| Mutex::new(false))
+}
+
+fn follow_phase_state() -> &'static Mutex<u8> {
+  FOLLOW_PHASE.get_or_init(|| Mutex::new(0))
+}
+
+fn follow_worker_running_state() -> &'static Mutex<bool> {
+  FOLLOW_WORKER_RUNNING.get_or_init(|| Mutex::new(false))
+}
+
+fn set_pumpkin_dragging_state(is_dragging: bool) {
+  if let Ok(mut dragging) = pumpkin_dragging_state().lock() {
+    *dragging = is_dragging;
+  }
+}
+
+fn is_pumpkin_dragging() -> bool {
+  pumpkin_dragging_state()
+    .lock()
+    .map(|dragging| *dragging)
+    .unwrap_or(false)
+}
+
+fn try_start_follow_worker<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+  let should_start = if let Ok(mut running) = follow_worker_running_state().lock() {
+    if *running {
+      false
+    } else {
+      *running = true;
+      true
+    }
+  } else {
+    false
+  };
+
+  if !should_start {
+    return;
+  }
+
+  thread::spawn(move || {
+    loop {
+      if !is_pumpkin_dragging() {
+        break;
+      }
+
+      let Some(main_window) = app.get_webview_window("main") else {
+        break;
+      };
+      let app_for_tick = app.clone();
+      let _ = main_window.run_on_main_thread(move || {
+        let Some(main_window) = app_for_tick.get_webview_window("main") else {
+          return;
+        };
+        let Some(pumpkin_window) = app_for_tick.get_webview_window("pumpkin") else {
+          return;
+        };
+        let _ = follow_main_toward_pumpkin_windows(&main_window, &pumpkin_window);
+      });
+      thread::sleep(Duration::from_millis(16));
+    }
+
+    if let Ok(mut running) = follow_worker_running_state().lock() {
+      *running = false;
+    }
+  });
+}
 
 #[tauri::command]
 fn start_drag(window: Window) -> Result<(), String> {
@@ -78,6 +152,27 @@ fn clamp_i32(value: i32, min: i32, max: i32) -> i32 {
   value.max(min).min(max)
 }
 
+fn monitor_bounds(window: &Window) -> Result<(i32, i32, u32, u32), String> {
+  let monitor = if let Some(current) = window.current_monitor().map_err(|error| error.to_string())? {
+    Some(current)
+  } else {
+    window.primary_monitor().map_err(|error| error.to_string())?
+  };
+
+  if let Some(monitor) = monitor {
+    let monitor_position = monitor.position();
+    let monitor_size = monitor.size();
+    Ok((
+      monitor_position.x,
+      monitor_position.y,
+      monitor_size.width,
+      monitor_size.height,
+    ))
+  } else {
+    Ok((0, 0, 1920, 1080))
+  }
+}
+
 fn touching_or_overlapping(
   ax: i32,
   ay: i32,
@@ -100,6 +195,48 @@ fn touching_or_overlapping(
   !(a_right < b_left || a_left > b_right || a_bottom < b_top || a_top > b_bottom)
 }
 
+fn close_pumpkin_if_touching(
+  window: &Window,
+  pumpkin_label: &str,
+  main_x: i32,
+  main_y: i32,
+  main_w: i32,
+  main_h: i32,
+) -> bool {
+  if is_pumpkin_dragging() {
+    return false;
+  }
+
+  let Some(pumpkin_window) = window.app_handle().get_webview_window(pumpkin_label) else {
+    return false;
+  };
+
+  let Ok(pumpkin_pos) = pumpkin_window.outer_position() else {
+    return false;
+  };
+  let Ok(pumpkin_size) = pumpkin_window.outer_size() else {
+    return false;
+  };
+
+  let touching = touching_or_overlapping(
+    main_x,
+    main_y,
+    main_w,
+    main_h,
+    pumpkin_pos.x,
+    pumpkin_pos.y,
+    pumpkin_size.width as i32,
+    pumpkin_size.height as i32,
+  );
+
+  if touching {
+    let _ = pumpkin_window.close();
+    return true;
+  }
+
+  false
+}
+
 fn walk_window_to(
   window: &Window,
   start_x: i32,
@@ -108,9 +245,6 @@ fn walk_window_to(
   target_y: i32,
   main_width: i32,
   main_height: i32,
-  pumpkin_x: i32,
-  pumpkin_y: i32,
-  pumpkin_size: i32,
   pumpkin_label: &str,
 ) -> Result<bool, String> {
   let delta_x = target_x - start_x;
@@ -131,6 +265,10 @@ fn walk_window_to(
   let wobble_amp = if distance < 180.0 { 1.3 } else { 2.0 };
 
   for step in 1..=steps {
+    if is_pumpkin_dragging() {
+      return Ok(false);
+    }
+
     let t = step as f64 / steps as f64;
     let eased_t = 0.5 - 0.5 * (std::f64::consts::PI * t).cos();
     let base_x = start_x as f64 + (delta_x as f64) * eased_t;
@@ -144,19 +282,7 @@ fn walk_window_to(
       .set_position(PhysicalPosition::new(x, y))
       .map_err(|error| error.to_string())?;
 
-    if touching_or_overlapping(
-      x,
-      y,
-      main_width,
-      main_height,
-      pumpkin_x,
-      pumpkin_y,
-      pumpkin_size,
-      pumpkin_size,
-    ) {
-      if let Some(pumpkin_window) = window.app_handle().get_webview_window(pumpkin_label) {
-        let _ = pumpkin_window.close();
-      }
+    if close_pumpkin_if_touching(window, pumpkin_label, x, y, main_width, main_height) {
       return Ok(true);
     }
 
@@ -169,23 +295,37 @@ fn walk_window_to(
     .set_position(PhysicalPosition::new(target_x, target_y))
     .map_err(|error| error.to_string())?;
 
-  if touching_or_overlapping(
-    target_x,
-    target_y,
-    main_width,
-    main_height,
-    pumpkin_x,
-    pumpkin_y,
-    pumpkin_size,
-    pumpkin_size,
-  ) {
-    if let Some(pumpkin_window) = window.app_handle().get_webview_window(pumpkin_label) {
-      let _ = pumpkin_window.close();
-    }
+  if close_pumpkin_if_touching(window, pumpkin_label, target_x, target_y, main_width, main_height) {
     return Ok(true);
   }
 
   Ok(false)
+}
+
+fn start_walk_to_pumpkin_worker(
+  window: Window,
+  target_x: i32,
+  target_y: i32,
+  main_width: i32,
+  main_height: i32,
+  pumpkin_label: &'static str,
+) {
+  thread::spawn(move || {
+    let Ok(start_position) = window.outer_position() else {
+      return;
+    };
+
+    let _ = walk_window_to(
+      &window,
+      start_position.x,
+      start_position.y,
+      target_x,
+      target_y,
+      main_width,
+      main_height,
+      pumpkin_label,
+    );
+  });
 }
 
 #[tauri::command]
@@ -193,29 +333,14 @@ async fn spawn_pumpkin(window: Window) -> Result<bool, String> {
   const PUMPKIN_LABEL: &str = "pumpkin";
   const PUMPKIN_SIZE: f64 = 220.0;
 
+  set_pumpkin_dragging_state(false);
+
   let app = window.app_handle();
   if let Some(existing) = app.get_webview_window(PUMPKIN_LABEL) {
     let _ = existing.close();
   }
 
-  let monitor = if let Some(current) = window.current_monitor().map_err(|error| error.to_string())? {
-    Some(current)
-  } else {
-    window.primary_monitor().map_err(|error| error.to_string())?
-  };
-
-  let (monitor_x, monitor_y, monitor_width, monitor_height) = if let Some(monitor) = monitor {
-    let monitor_position = monitor.position();
-    let monitor_size = monitor.size();
-    (
-      monitor_position.x,
-      monitor_position.y,
-      monitor_size.width,
-      monitor_size.height,
-    )
-  } else {
-    (0, 0, 1920, 1080)
-  };
+  let (monitor_x, monitor_y, monitor_width, monitor_height) = monitor_bounds(&window)?;
 
   let pumpkin_size = PUMPKIN_SIZE.round() as i32;
   let max_x = monitor_x + (monitor_width as i32 - pumpkin_size).max(0);
@@ -274,22 +399,120 @@ async fn spawn_pumpkin(window: Window) -> Result<bool, String> {
   let max_main_y = monitor_y + (monitor_height as i32 - main_height).max(0);
   let target_y = clamp_i32(centered_y, min_main_y, max_main_y);
 
-  let start_position = window.outer_position().map_err(|error| error.to_string())?;
-  let touched = walk_window_to(
-    &window,
-    start_position.x,
-    start_position.y,
+  start_walk_to_pumpkin_worker(
+    window.clone(),
     target_x,
     target_y,
     main_width,
     main_height,
-    pumpkin_x,
-    pumpkin_y,
-    pumpkin_size,
     PUMPKIN_LABEL,
-  )?;
+  );
 
-  Ok(touched)
+  Ok(false)
+}
+
+fn follow_main_toward_pumpkin_windows<R: tauri::Runtime>(
+  main_window: &tauri::WebviewWindow<R>,
+  pumpkin_window: &tauri::WebviewWindow<R>,
+) -> Result<(), String> {
+  const PUMPKIN_GAP: i32 = 0;
+  const FOLLOW_RATIO: f64 = 0.18;
+  const MAX_STEP: i32 = 8;
+
+  let pumpkin_pos = pumpkin_window.outer_position().map_err(|error| error.to_string())?;
+  let pumpkin_size = pumpkin_window.outer_size().map_err(|error| error.to_string())?;
+  let main_pos = main_window.outer_position().map_err(|error| error.to_string())?;
+  let main_size = main_window.outer_size().map_err(|error| error.to_string())?;
+
+  let pumpkin_x = pumpkin_pos.x;
+  let pumpkin_y = pumpkin_pos.y;
+  let pumpkin_w = pumpkin_size.width as i32;
+  let pumpkin_h = pumpkin_size.height as i32;
+  let main_w = main_size.width as i32;
+  let main_h = main_size.height as i32;
+
+  let monitor = if let Some(current) = main_window.current_monitor().map_err(|error| error.to_string())? {
+    Some(current)
+  } else {
+    main_window.primary_monitor().map_err(|error| error.to_string())?
+  };
+  let (monitor_x, monitor_y, monitor_width, monitor_height) = if let Some(monitor) = monitor {
+    let monitor_position = monitor.position();
+    let monitor_size = monitor.size();
+    (
+      monitor_position.x,
+      monitor_position.y,
+      monitor_size.width,
+      monitor_size.height,
+    )
+  } else {
+    (0, 0, 1920, 1080)
+  };
+  let left_candidate = pumpkin_x - main_w - PUMPKIN_GAP;
+  let right_candidate = pumpkin_x + pumpkin_w + PUMPKIN_GAP;
+  let centered_x = pumpkin_x + pumpkin_w / 2 - main_w / 2;
+  let min_main_x = monitor_x;
+  let max_main_x = monitor_x + (monitor_width as i32 - main_w).max(0);
+  let target_x = if left_candidate >= min_main_x {
+    left_candidate
+  } else if right_candidate <= max_main_x {
+    right_candidate
+  } else {
+    clamp_i32(centered_x, min_main_x, max_main_x)
+  };
+
+  let centered_y = pumpkin_y + pumpkin_h / 2 - main_h / 2;
+  let min_main_y = monitor_y;
+  let max_main_y = monitor_y + (monitor_height as i32 - main_h).max(0);
+  let target_y = clamp_i32(centered_y, min_main_y, max_main_y);
+
+  let delta_x = target_x - main_pos.x;
+  let delta_y = target_y - main_pos.y;
+  if delta_x.abs() <= 1 && delta_y.abs() <= 1 {
+    return Ok(());
+  }
+
+  let mut step_x = (delta_x as f64 * FOLLOW_RATIO).round() as i32;
+  let mut step_y = (delta_y as f64 * FOLLOW_RATIO).round() as i32;
+  if step_x == 0 && delta_x != 0 {
+    step_x = delta_x.signum();
+  }
+  if step_y == 0 && delta_y != 0 {
+    step_y = delta_y.signum();
+  }
+  step_x = clamp_i32(step_x, -MAX_STEP, MAX_STEP);
+  step_y = clamp_i32(step_y, -MAX_STEP, MAX_STEP);
+
+  let bob = if let Ok(mut phase) = follow_phase_state().lock() {
+    *phase = (*phase + 1) % 4;
+    match *phase {
+      1 => 1,
+      3 => -1,
+      _ => 0,
+    }
+  } else {
+    0
+  };
+
+  let next_x = clamp_i32(main_pos.x + step_x, min_main_x, max_main_x);
+  let next_y = clamp_i32(main_pos.y + step_y + bob, min_main_y, max_main_y);
+  main_window
+    .set_position(PhysicalPosition::new(next_x, next_y))
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn start_pumpkin_drag(window: Window) {
+  set_pumpkin_dragging_state(true);
+  try_start_follow_worker(window.app_handle().clone());
+}
+
+#[tauri::command]
+fn stop_pumpkin_drag() {
+  set_pumpkin_dragging_state(false);
+  if let Ok(mut phase) = follow_phase_state().lock() {
+    *phase = 0;
+  }
 }
 
 #[tauri::command]
@@ -306,6 +529,8 @@ pub fn run() {
       get_window_geometry,
       set_window_position,
       spawn_pumpkin,
+      start_pumpkin_drag,
+      stop_pumpkin_drag,
       exit_app
     ])
     .on_page_load(|window, payload| {

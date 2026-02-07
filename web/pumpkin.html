@@ -49,20 +49,35 @@
           }
 
           pumpkinImage.classList.add("dragging");
-          invokeTauri("start_drag").catch(function () {
-            // Ignore drag failures in non-Tauri contexts.
-          });
+          invokeTauri("start_pumpkin_drag")
+            .catch(function (error) {
+              console.error("start_pumpkin_drag failed", error);
+            })
+            .finally(function () {
+              invokeTauri("start_drag").catch(function (error) {
+                console.error("start_drag failed", error);
+              });
+            });
         });
 
         window.addEventListener("pointerup", function () {
           pumpkinImage.classList.remove("dragging");
+          invokeTauri("stop_pumpkin_drag").catch(function () {
+            // Ignore state sync failures.
+          });
         });
 
         window.addEventListener("pointercancel", function () {
           pumpkinImage.classList.remove("dragging");
+          invokeTauri("stop_pumpkin_drag").catch(function () {
+            // Ignore state sync failures.
+          });
         });
 
         pumpkinImage.addEventListener("dblclick", function () {
+          invokeTauri("stop_pumpkin_drag").catch(function () {
+            // Ignore state sync failures.
+          });
           try {
             window.close();
           } catch (_error) {
@@ -71,6 +86,12 @@
         });
       }
 
+      window.addEventListener("beforeunload", function () {
+        invokeTauri("stop_pumpkin_drag").catch(function () {
+          // Ignore state sync failures.
+        });
+      });
+
       window.addEventListener("contextmenu", function (event) {
         event.preventDefault();
       });
@@ -78,3 +99,4 @@
   </script>
 </body>
 </html>
+
