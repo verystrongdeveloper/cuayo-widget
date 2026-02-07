@@ -256,10 +256,13 @@
         desktopWindowReady: false,
         desktopMoveQueued: false,
         desktopTargetX: null,
-        desktopTargetY: null
+        desktopTargetY: null,
+        desktopDragArmed: false,
+        desktopDragHoldTimer: null
       };
       let expressionIndex = 0;
       let activeAudio = null;
+      const desktopDragHoldMs = 260;
       const forcedDragExpressionIndex = expressions.findIndex(function (expression) {
         return expression.id === "crying";
       });
@@ -331,6 +334,13 @@
 
       function playDragVoice() {
         playVoice(randomItem(dragVoices));
+      }
+
+      function clearDesktopDragHoldTimer() {
+        if (state.desktopDragHoldTimer !== null) {
+          window.clearTimeout(state.desktopDragHoldTimer);
+          state.desktopDragHoldTimer = null;
+        }
       }
 
       function setExpression(nextIndex, shouldPlayVoice) {
@@ -406,6 +416,8 @@
           return;
         }
 
+        clearDesktopDragHoldTimer();
+        state.desktopDragArmed = false;
         if (state.dragging || state.dragExpressionIndex !== null || widget.classList.contains("dragging")) {
           if (state.moved || state.dragging) {
             state.suppressClickUntil = Date.now() + 450;
@@ -569,12 +581,24 @@
           state.desktopStartScreenY = event.screenY;
           state.moved = false;
           state.desktopPointerDown = true;
+          state.desktopDragArmed = false;
           state.desktopWindowReady = false;
           state.desktopTargetX = null;
           state.desktopTargetY = null;
           state.desktopAutoMoveLockUntil = Date.now() + 4500;
-          setDraggingVisual(true);
           widget.setPointerCapture(event.pointerId);
+          clearDesktopDragHoldTimer();
+
+          const holdPointerId = event.pointerId;
+          state.desktopDragHoldTimer = window.setTimeout(function () {
+            if (!state.desktopPointerDown || state.pointerId !== holdPointerId) {
+              return;
+            }
+            state.desktopDragArmed = true;
+            state.dragging = true;
+            setDraggingVisual(true);
+            playDragVoice();
+          }, desktopDragHoldMs);
 
           invokeTauri("get_window_geometry")
             .then(function (geometry) {
@@ -600,13 +624,14 @@
           const deltaX = Math.abs(signedDeltaX);
           const deltaY = Math.abs(signedDeltaY);
           setFacingByDelta(signedDeltaX);
+          if (!state.desktopDragArmed) {
+            return;
+          }
+
           if (!state.moved && deltaX <= 1 && deltaY <= 1) {
             return;
           }
 
-          if (!state.moved) {
-            playDragVoice();
-          }
           state.moved = true;
           state.dragging = true;
           if (!state.desktopWindowReady) {
