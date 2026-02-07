@@ -463,6 +463,33 @@
         playVoice("eww.WAV");
       }
 
+      function startPumpkinEatPolling() {
+        if (!isTauriDesktop) {
+          return;
+        }
+
+        let pollBusy = false;
+        window.setInterval(function () {
+          if (state.exiting || pollBusy) {
+            return;
+          }
+
+          pollBusy = true;
+          invokeTauri("take_pumpkin_eaten_flag")
+            .then(function (isEaten) {
+              if (isEaten) {
+                playVoice("I like pumpkin.WAV");
+              }
+            })
+            .catch(function () {
+              // Ignore intermittent invoke failures.
+            })
+            .finally(function () {
+              pollBusy = false;
+            });
+        }, 120);
+      }
+
       function clearDesktopDragHoldTimer() {
         if (state.desktopDragHoldTimer !== null) {
           window.clearTimeout(state.desktopDragHoldTimer);
@@ -1077,6 +1104,7 @@
           state.desktopPointerDown = false;
           finishDesktopDrag();
         });
+        startPumpkinEatPolling();
         startDesktopHorizontalWander();
         return;
       }

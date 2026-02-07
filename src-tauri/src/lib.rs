@@ -9,6 +9,7 @@ use tauri::{Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, Window}
 static PUMPKIN_DRAGGING: OnceLock<Mutex<bool>> = OnceLock::new();
 static FOLLOW_PHASE: OnceLock<Mutex<u8>> = OnceLock::new();
 static FOLLOW_WORKER_RUNNING: OnceLock<Mutex<bool>> = OnceLock::new();
+static PUMPKIN_EATEN_PENDING: OnceLock<Mutex<bool>> = OnceLock::new();
 
 fn pumpkin_dragging_state() -> &'static Mutex<bool> {
   PUMPKIN_DRAGGING.get_or_init(|| Mutex::new(false))
@@ -22,6 +23,10 @@ fn follow_worker_running_state() -> &'static Mutex<bool> {
   FOLLOW_WORKER_RUNNING.get_or_init(|| Mutex::new(false))
 }
 
+fn pumpkin_eaten_pending_state() -> &'static Mutex<bool> {
+  PUMPKIN_EATEN_PENDING.get_or_init(|| Mutex::new(false))
+}
+
 fn set_pumpkin_dragging_state(is_dragging: bool) {
   if let Ok(mut dragging) = pumpkin_dragging_state().lock() {
     *dragging = is_dragging;
@@ -33,6 +38,25 @@ fn is_pumpkin_dragging() -> bool {
     .lock()
     .map(|dragging| *dragging)
     .unwrap_or(false)
+}
+
+fn on_pumpkin_eaten() {
+  set_pumpkin_dragging_state(false);
+  if let Ok(mut phase) = follow_phase_state().lock() {
+    *phase = 0;
+  }
+  if let Ok(mut pending) = pumpkin_eaten_pending_state().lock() {
+    *pending = true;
+  }
+}
+
+fn take_pumpkin_eaten_pending() -> bool {
+  if let Ok(mut pending) = pumpkin_eaten_pending_state().lock() {
+    let was_pending = *pending;
+    *pending = false;
+    return was_pending;
+  }
+  false
 }
 
 fn try_start_follow_worker<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
@@ -81,7 +105,14 @@ fn try_start_follow_worker<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
 
 #[tauri::command]
 fn start_drag(window: Window) -> Result<(), String> {
-  window.start_dragging().map_err(|error| error.to_string())
+  window.start_dragging().map_err(|error| error.to_string())?;
+
+  if window.label() == "pumpkin" {
+    set_pumpkin_dragging_state(true);
+    try_start_follow_worker(window.app_handle().clone());
+  }
+
+  Ok(())
 }
 
 #[derive(Serialize)]
@@ -203,10 +234,6 @@ fn close_pumpkin_if_touching(
   main_w: i32,
   main_h: i32,
 ) -> bool {
-  if is_pumpkin_dragging() {
-    return false;
-  }
-
   let Some(pumpkin_window) = window.app_handle().get_webview_window(pumpkin_label) else {
     return false;
   };
@@ -231,6 +258,41 @@ fn close_pumpkin_if_touching(
 
   if touching {
     let _ = pumpkin_window.close();
+    on_pumpkin_eaten();
+    return true;
+  }
+
+  false
+}
+
+fn close_dragging_pumpkin_if_touching<R: tauri::Runtime>(
+  pumpkin_window: &tauri::WebviewWindow<R>,
+  main_x: i32,
+  main_y: i32,
+  main_w: i32,
+  main_h: i32,
+) -> bool {
+  let Ok(pumpkin_pos) = pumpkin_window.outer_position() else {
+    return false;
+  };
+  let Ok(pumpkin_size) = pumpkin_window.outer_size() else {
+    return false;
+  };
+
+  let touching = touching_or_overlapping(
+    main_x,
+    main_y,
+    main_w,
+    main_h,
+    pumpkin_pos.x,
+    pumpkin_pos.y,
+    pumpkin_size.width as i32,
+    pumpkin_size.height as i32,
+  );
+
+  if touching {
+    let _ = pumpkin_window.close();
+    on_pumpkin_eaten();
     return true;
   }
 
@@ -245,6 +307,8 @@ fn walk_window_to(
   target_y: i32,
   main_width: i32,
   main_height: i32,
+  initial_pumpkin_x: i32,
+  initial_pumpkin_y: i32,
   pumpkin_label: &str,
 ) -> Result<bool, String> {
   let delta_x = target_x - start_x;
@@ -267,6 +331,14 @@ fn walk_window_to(
   for step in 1..=steps {
     if is_pumpkin_dragging() {
       return Ok(false);
+    }
+
+    if let Some(pumpkin_window) = window.app_handle().get_webview_window(pumpkin_label) {
+      if let Ok(pumpkin_pos) = pumpkin_window.outer_position() {
+        if (pumpkin_pos.x - initial_pumpkin_x).abs() > 2 || (pumpkin_pos.y - initial_pumpkin_y).abs() > 2 {
+          return Ok(false);
+        }
+      }
     }
 
     let t = step as f64 / steps as f64;
@@ -308,6 +380,8 @@ fn start_walk_to_pumpkin_worker(
   target_y: i32,
   main_width: i32,
   main_height: i32,
+  initial_pumpkin_x: i32,
+  initial_pumpkin_y: i32,
   pumpkin_label: &'static str,
 ) {
   thread::spawn(move || {
@@ -323,6 +397,8 @@ fn start_walk_to_pumpkin_worker(
       target_y,
       main_width,
       main_height,
+      initial_pumpkin_x,
+      initial_pumpkin_y,
       pumpkin_label,
     );
   });
@@ -405,6 +481,8 @@ async fn spawn_pumpkin(window: Window) -> Result<bool, String> {
     target_y,
     main_width,
     main_height,
+    pumpkin_x,
+    pumpkin_y,
     PUMPKIN_LABEL,
   );
 
@@ -430,6 +508,10 @@ fn follow_main_toward_pumpkin_windows<R: tauri::Runtime>(
   let pumpkin_h = pumpkin_size.height as i32;
   let main_w = main_size.width as i32;
   let main_h = main_size.height as i32;
+
+  if close_dragging_pumpkin_if_touching(pumpkin_window, main_pos.x, main_pos.y, main_w, main_h) {
+    return Ok(());
+  }
 
   let monitor = if let Some(current) = main_window.current_monitor().map_err(|error| error.to_string())? {
     Some(current)
@@ -469,6 +551,7 @@ fn follow_main_toward_pumpkin_windows<R: tauri::Runtime>(
   let delta_x = target_x - main_pos.x;
   let delta_y = target_y - main_pos.y;
   if delta_x.abs() <= 1 && delta_y.abs() <= 1 {
+    let _ = close_dragging_pumpkin_if_touching(pumpkin_window, main_pos.x, main_pos.y, main_w, main_h);
     return Ok(());
   }
 
@@ -498,7 +581,10 @@ fn follow_main_toward_pumpkin_windows<R: tauri::Runtime>(
   let next_y = clamp_i32(main_pos.y + step_y + bob, min_main_y, max_main_y);
   main_window
     .set_position(PhysicalPosition::new(next_x, next_y))
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+
+  let _ = close_dragging_pumpkin_if_touching(pumpkin_window, next_x, next_y, main_w, main_h);
+  Ok(())
 }
 
 #[tauri::command]
@@ -513,6 +599,11 @@ fn stop_pumpkin_drag() {
   if let Ok(mut phase) = follow_phase_state().lock() {
     *phase = 0;
   }
+}
+
+#[tauri::command]
+fn take_pumpkin_eaten_flag() -> bool {
+  take_pumpkin_eaten_pending()
 }
 
 #[tauri::command]
@@ -531,6 +622,7 @@ pub fn run() {
       spawn_pumpkin,
       start_pumpkin_drag,
       stop_pumpkin_drag,
+      take_pumpkin_eaten_flag,
       exit_app
     ])
     .on_page_load(|window, payload| {
