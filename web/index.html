@@ -286,6 +286,10 @@
       <p class="settings-title">Speaki Settings</p>
       <div class="settings-actions">
         <div class="settings-row">
+          <span>Hunger</span>
+          <span id="settingsHungerValue" class="settings-value">100</span>
+        </div>
+        <div class="settings-row">
           <span>Character size</span>
           <span id="settingsSizeValue" class="settings-value">280px</span>
         </div>
@@ -303,6 +307,7 @@
       const sprite = widget.querySelector("img");
       const guide = document.querySelector(".guide");
       const settingsPanel = document.getElementById("settingsPanel");
+      const settingsHungerValue = document.getElementById("settingsHungerValue");
       const settingsSizeRange = document.getElementById("settingsSizeRange");
       const settingsSizeValue = document.getElementById("settingsSizeValue");
       const settingsPumpkinButton = document.getElementById("settingsPumpkinButton");
@@ -382,14 +387,17 @@
         desktopDragHoldTimer: null,
         settingsOpen: false,
         exiting: false,
-        sulking: false
+        sulking: false,
+        hunger: 100
       };
       let expressionIndex = 0;
       let activeAudio = null;
       let dragFlipTimer = null;
       let desktopFacingTrackTimer = null;
       let desktopLastWindowX = null;
+      let hungerDrainTimer = null;
       const desktopDragHoldMs = 260;
+      const hungerDrainTickMs = 6000;
       const forcedDragExpressionIndex = expressions.findIndex(function (expression) {
         return expression.id === "crying";
       });
@@ -423,6 +431,32 @@
         return new Promise(function (resolve) {
           window.setTimeout(resolve, ms);
         });
+      }
+
+      function updateHungerDisplay() {
+        if (!settingsHungerValue) {
+          return;
+        }
+        settingsHungerValue.textContent = String(state.hunger);
+      }
+
+      function stopHungerDrain() {
+        if (hungerDrainTimer !== null) {
+          window.clearInterval(hungerDrainTimer);
+          hungerDrainTimer = null;
+        }
+      }
+
+      function startHungerDrain() {
+        stopHungerDrain();
+        hungerDrainTimer = window.setInterval(function () {
+          if (state.exiting || state.hunger <= 0) {
+            return;
+          }
+
+          state.hunger = Math.max(0, state.hunger - 1);
+          updateHungerDisplay();
+        }, hungerDrainTickMs);
       }
 
       function stopDesktopFacingTracking() {
@@ -795,6 +829,7 @@
         }
 
         state.exiting = true;
+        stopHungerDrain();
         stopDesktopFacingTracking();
         state.settingsOpen = false;
         closeSettingsPanel();
@@ -1108,6 +1143,8 @@
 
       setExpression(0, false);
       loadWidgetSize();
+      updateHungerDisplay();
+      startHungerDrain();
 
       if (isTauriDesktop) {
         document.body.classList.add("desktop-widget-mode");
