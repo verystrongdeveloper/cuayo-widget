@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Speaki Widget",
+  "productName": "Cuayo widget",
   "version": "1.0.0",
   "identifier": "com.cuayo.widget",
   "build": {
@@ -10,7 +10,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Speaki Widget",
+        "title": "Cuayo widget",
         "width": 340,
         "height": 340,
         "minWidth": 240,
