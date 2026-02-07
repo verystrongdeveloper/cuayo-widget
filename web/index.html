@@ -133,26 +133,15 @@
       -webkit-user-drag: none;
       touch-action: none;
       cursor: grab;
-      filter: drop-shadow(0 12px 20px rgba(0, 0, 0, 0.28));
       animation: show-up 0.45s ease-out;
     }
 
     .speaki-widget::before {
-      content: "";
-      position: absolute;
-      left: 12%;
-      right: 12%;
-      bottom: 4%;
-      height: 18%;
-      border-radius: 999px;
-      background: radial-gradient(circle at center, rgba(255, 209, 220, 0.55), rgba(255, 209, 220, 0));
-      z-index: 0;
-      pointer-events: none;
+      content: none;
     }
 
     .speaki-widget.dragging {
       cursor: grabbing;
-      filter: drop-shadow(0 16px 26px rgba(0, 0, 0, 0.35));
     }
 
     .speaki-widget img {
@@ -195,10 +184,6 @@
     .speaki-widget.exiting {
       animation: dissolve-away 760ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
       pointer-events: none;
-    }
-
-    .speaki-widget.exiting::before {
-      animation: shadow-fade-away 760ms ease-out forwards;
     }
 
     .speaki-widget.exiting img {
@@ -266,16 +251,6 @@
       }
       100% {
         opacity: 0;
-      }
-    }
-
-    @keyframes shadow-fade-away {
-      0% {
-        opacity: 1;
-      }
-      100% {
-        opacity: 0;
-        transform: scale(0.35);
       }
     }
 
