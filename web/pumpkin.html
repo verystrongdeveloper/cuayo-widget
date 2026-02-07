@@ -21,19 +21,58 @@
       user-select: none;
       -webkit-user-drag: none;
       pointer-events: auto;
+      cursor: grab;
+    }
+
+    .pumpkin.dragging {
+      cursor: grabbing;
     }
   </style>
 </head>
 <body>
-  <img class="pumpkin" src="./images/hobak.png" alt="Pumpkin" draggable="false" />
+  <img id="pumpkinImage" class="pumpkin" src="./images/hobak.png" alt="Pumpkin" draggable="false" />
   <script>
     (function () {
-      window.addEventListener("pointerdown", function () {
-        try {
-          window.close();
-        } catch (_error) {
-          // Ignore close errors.
+      const pumpkinImage = document.getElementById("pumpkinImage");
+
+      function invokeTauri(commandName, payload) {
+        if (!window.__TAURI_INTERNALS__ || typeof window.__TAURI_INTERNALS__.invoke !== "function") {
+          return Promise.reject(new Error("Tauri invoke is unavailable"));
         }
+        return window.__TAURI_INTERNALS__.invoke(commandName, payload || {});
+      }
+
+      if (pumpkinImage) {
+        pumpkinImage.addEventListener("pointerdown", function (event) {
+          if (event.button !== 0 && event.pointerType !== "touch") {
+            return;
+          }
+
+          pumpkinImage.classList.add("dragging");
+          invokeTauri("start_drag").catch(function () {
+            // Ignore drag failures in non-Tauri contexts.
+          });
+        });
+
+        window.addEventListener("pointerup", function () {
+          pumpkinImage.classList.remove("dragging");
+        });
+
+        window.addEventListener("pointercancel", function () {
+          pumpkinImage.classList.remove("dragging");
+        });
+
+        pumpkinImage.addEventListener("dblclick", function () {
+          try {
+            window.close();
+          } catch (_error) {
+            // Ignore close errors.
+          }
+        });
+      }
+
+      window.addEventListener("contextmenu", function (event) {
+        event.preventDefault();
       });
     })();
   </script>
