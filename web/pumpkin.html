@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pumpkin</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+    }
+
+    .pumpkin {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      user-select: none;
+      -webkit-user-drag: none;
+      pointer-events: auto;
+    }
+  </style>
+</head>
+<body>
+  <img class="pumpkin" src="./images/hobak.png" alt="Pumpkin" draggable="false" />
+  <script>
+    (function () {
+      window.addEventListener("pointerdown", function () {
+        try {
+          window.close();
+        } catch (_error) {
+          // Ignore close errors.
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

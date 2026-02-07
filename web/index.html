@@ -290,6 +290,7 @@
           <span id="settingsSizeValue" class="settings-value">280px</span>
         </div>
         <input id="settingsSizeRange" class="settings-range" type="range" min="140" max="420" step="10" value="280" />
+        <button id="settingsPumpkinButton" type="button" class="settings-button">Pumpkin</button>
         <button id="settingsExitButton" type="button" class="settings-button secondary">Exit</button>
       </div>
     </div>
@@ -304,6 +305,7 @@
       const settingsPanel = document.getElementById("settingsPanel");
       const settingsSizeRange = document.getElementById("settingsSizeRange");
       const settingsSizeValue = document.getElementById("settingsSizeValue");
+      const settingsPumpkinButton = document.getElementById("settingsPumpkinButton");
       const settingsExitButton = document.getElementById("settingsExitButton");
       const storageKey = "speaki-widget-position-v1";
       const sizeStorageKey = "speaki-widget-size-v1";
@@ -883,6 +885,31 @@
             adjustPosition: !isTauriDesktop,
             persistPosition: !isTauriDesktop
           });
+        });
+      }
+
+      if (settingsPumpkinButton) {
+        settingsPumpkinButton.addEventListener("click", function () {
+          if (state.exiting) {
+            return;
+          }
+
+          if (isTauriDesktop) {
+            invokeTauri("spawn_pumpkin")
+              .then(function () {
+                closeSettingsPanel();
+              })
+              .catch(function () {
+                setGuide("Pumpkin spawn failed.");
+              });
+            return;
+          }
+
+          const popup = window.open(assetPath("images", "hobak.png"), "_blank");
+          if (!popup) {
+            setGuide("Popup blocked. Allow popups to show pumpkin.");
+          }
+          closeSettingsPanel();
         });
       }
 
