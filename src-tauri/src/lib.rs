@@ -1,5 +1,5 @@
 use serde::Serialize;
-use tauri::{PhysicalPosition, Window};
+use tauri::{Manager, PhysicalPosition, Window};
 
 #[tauri::command]
 fn start_drag(window: Window) -> Result<(), String> {
@@ -61,10 +61,21 @@ fn set_window_position(window: Window, x: i32, y: i32) -> Result<(), String> {
     .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn exit_app(window: Window) -> Result<(), String> {
+  window.app_handle().exit(0);
+  Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![start_drag, get_window_geometry, set_window_position])
+    .invoke_handler(tauri::generate_handler![
+      start_drag,
+      get_window_geometry,
+      set_window_position,
+      exit_app
+    ])
     .on_page_load(|window, payload| {
       println!("[speaki] loaded url: {} on {}", payload.url(), window.label());
     })

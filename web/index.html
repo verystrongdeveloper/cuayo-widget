@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
@@ -192,6 +192,19 @@
       display: none;
     }
 
+    .speaki-widget.exiting {
+      animation: dissolve-away 900ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+      pointer-events: none;
+    }
+
+    .speaki-widget.exiting::before {
+      animation: shadow-fade-away 900ms ease-out forwards;
+    }
+
+    .speaki-widget.exiting img {
+      animation: character-fade-away 900ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+
     .browser-draggable {
       position: fixed;
       left: 0;
@@ -246,10 +259,42 @@
         transform: scaleX(-1) translateY(0) rotate(0deg);
       }
     }
+
+    @keyframes dissolve-away {
+      0% {
+        opacity: 1;
+      }
+      100% {
+        opacity: 0;
+      }
+    }
+
+    @keyframes shadow-fade-away {
+      0% {
+        opacity: 1;
+      }
+      100% {
+        opacity: 0;
+        transform: scale(0.35);
+      }
+    }
+
+    @keyframes character-fade-away {
+      0% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+      }
+      100% {
+        opacity: 0;
+        transform: translateY(-12px) scale(0.5);
+        filter: blur(3px);
+      }
+    }
   </style>
 </head>
 <body>
-  <main class="stage">
+  <main id="stage" class="stage">
     <div class="guide">Click Speaki: next mood + voice. Right-click: open settings.</div>
     <div id="speakiWidget" class="speaki-widget" aria-label="Speaki widget">
       <img src="./images/speaki_smile.png" alt="Speaki character" draggable="false" />
@@ -262,20 +307,21 @@
           <span id="settingsSizeValue" class="settings-value">280px</span>
         </div>
         <input id="settingsSizeRange" class="settings-range" type="range" min="140" max="420" step="10" value="280" />
-        <button id="settingsCloseButton" type="button" class="settings-button secondary">Close</button>
+        <button id="settingsExitButton" type="button" class="settings-button secondary">Exit</button>
       </div>
     </div>
   </main>
 
   <script>
     (function () {
+      const stage = document.getElementById("stage");
       const widget = document.getElementById("speakiWidget");
       const sprite = widget.querySelector("img");
       const guide = document.querySelector(".guide");
       const settingsPanel = document.getElementById("settingsPanel");
       const settingsSizeRange = document.getElementById("settingsSizeRange");
       const settingsSizeValue = document.getElementById("settingsSizeValue");
-      const settingsCloseButton = document.getElementById("settingsCloseButton");
+      const settingsExitButton = document.getElementById("settingsExitButton");
       const storageKey = "speaki-widget-position-v1";
       const sizeStorageKey = "speaki-widget-size-v1";
       const margin = 8;
@@ -349,7 +395,8 @@
         desktopTargetY: null,
         desktopDragArmed: false,
         desktopDragHoldTimer: null,
-        settingsOpen: false
+        settingsOpen: false,
+        exiting: false
       };
       let expressionIndex = 0;
       let activeAudio = null;
@@ -427,11 +474,43 @@
         playVoice(randomItem(dragVoices));
       }
 
+      function playExitVoice() {
+        playVoice("eww.WAV");
+      }
+
       function clearDesktopDragHoldTimer() {
         if (state.desktopDragHoldTimer !== null) {
           window.clearTimeout(state.desktopDragHoldTimer);
           state.desktopDragHoldTimer = null;
         }
+      }
+
+      function waitForAnimationEnd(element, timeoutMs) {
+        return new Promise(function (resolve) {
+          if (!element) {
+            resolve();
+            return;
+          }
+
+          let settled = false;
+          function done() {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            element.removeEventListener("animationend", onEnd);
+            resolve();
+          }
+
+          function onEnd(event) {
+            if (event.target === element) {
+              done();
+            }
+          }
+
+          element.addEventListener("animationend", onEnd);
+          window.setTimeout(done, timeoutMs);
+        });
       }
 
       function setExpression(nextIndex, shouldPlayVoice) {
@@ -531,7 +610,7 @@
       }
 
       function openSettingsPanel(clientX, clientY) {
-        if (!settingsPanel) {
+        if (!settingsPanel || state.exiting) {
           return;
         }
 
@@ -556,6 +635,52 @@
         settingsPanel.style.top = safeY + "px";
         updateSizeControl(currentWidgetWidth());
         state.settingsOpen = true;
+      }
+
+      async function exitApp() {
+        if (isTauriDesktop) {
+          try {
+            await invokeTauri("exit_app");
+            return;
+          } catch (_error) {
+            setGuide("Exit failed. Please close manually.");
+          }
+        }
+
+        try {
+          window.close();
+        } catch (_error) {
+          setGuide("This browser blocked closing the window.");
+        }
+      }
+
+      async function runExitSequence() {
+        if (state.exiting) {
+          return;
+        }
+
+        state.exiting = true;
+        state.settingsOpen = false;
+        closeSettingsPanel();
+        clearDesktopDragHoldTimer();
+        if (state.pointerId !== null && widget.hasPointerCapture(state.pointerId)) {
+          widget.releasePointerCapture(state.pointerId);
+        }
+        state.dragging = false;
+        state.pointerId = null;
+        state.desktopPointerDown = false;
+        state.desktopDragArmed = false;
+        state.desktopTargetX = null;
+        state.desktopTargetY = null;
+        state.desktopAutoMoveLockUntil = Number.MAX_SAFE_INTEGER;
+        setDraggingVisual(false);
+        setGuide("Exit...");
+        setExpression(forcedDragExpressionIndex >= 0 ? forcedDragExpressionIndex : 0, false);
+        playExitVoice();
+        await wait(520);
+        widget.classList.add("exiting");
+        await waitForAnimationEnd(widget, 1000);
+        await exitApp();
       }
 
       function queueDesktopWindowMove(x, y) {
@@ -633,7 +758,7 @@
       }
 
       async function moveDesktopWindowRandomX() {
-        if (state.settingsOpen) {
+        if (state.settingsOpen || state.exiting) {
           return;
         }
 
@@ -669,7 +794,7 @@
         let stepCount = 0;
         let hop = null;
         while (Math.abs(targetX - currentX) > 0) {
-          if (state.dragging || Date.now() < state.desktopAutoMoveLockUntil) {
+          if (state.exiting || state.dragging || Date.now() < state.desktopAutoMoveLockUntil) {
             return;
           }
 
@@ -713,7 +838,7 @@
           const nextWait = Math.round(1100 + Math.random() * 2600);
           await wait(nextWait);
 
-          if (state.settingsOpen || state.dragging || Date.now() < state.desktopAutoMoveLockUntil) {
+          if (state.exiting || state.settingsOpen || state.dragging || Date.now() < state.desktopAutoMoveLockUntil) {
             continue;
           }
 
@@ -737,6 +862,9 @@
       });
 
       widget.addEventListener("click", function () {
+        if (state.exiting) {
+          return;
+        }
         closeSettingsPanel();
         if (state.dragging) {
           return;
@@ -753,7 +881,7 @@
 
       widget.addEventListener("contextmenu", function (event) {
         event.preventDefault();
-        if (state.dragging) {
+        if (state.dragging || state.exiting) {
           return;
         }
         openSettingsPanel(event.clientX, event.clientY);
@@ -775,12 +903,14 @@
         });
       }
 
-      if (settingsCloseButton) {
-        settingsCloseButton.addEventListener("click", closeSettingsPanel);
+      if (settingsExitButton) {
+        settingsExitButton.addEventListener("click", function () {
+          runExitSequence();
+        });
       }
 
       document.addEventListener("pointerdown", function (event) {
-        if (!state.settingsOpen || !settingsPanel) {
+        if (state.exiting || !state.settingsOpen || !settingsPanel) {
           return;
         }
         if (settingsPanel.contains(event.target)) {
@@ -789,7 +919,21 @@
         closeSettingsPanel();
       });
 
+      if (stage) {
+        stage.addEventListener("pointerdown", function (event) {
+          if (!state.settingsOpen || state.exiting) {
+            return;
+          }
+          if (event.target === stage) {
+            closeSettingsPanel();
+          }
+        });
+      }
+
       window.addEventListener("keydown", function (event) {
+        if (state.exiting) {
+          return;
+        }
         if (event.key === "Escape") {
           closeSettingsPanel();
         }
@@ -804,6 +948,9 @@
         state.desktopAutoMoveLockUntil = Date.now() + 1500;
 
         widget.addEventListener("pointerdown", function (event) {
+          if (state.exiting) {
+            return;
+          }
           if (state.settingsOpen) {
             closeSettingsPanel();
             return;
@@ -858,6 +1005,9 @@
         });
 
         widget.addEventListener("pointermove", function (event) {
+          if (state.exiting) {
+            return;
+          }
           if (state.pointerId !== event.pointerId) {
             return;
           }
@@ -888,6 +1038,9 @@
         });
 
         function stopDesktopDrag(event) {
+          if (state.exiting) {
+            return;
+          }
           if (state.pointerId !== event.pointerId) {
             return;
           }
@@ -976,6 +1129,9 @@
       });
 
       widget.addEventListener("pointerdown", function (event) {
+        if (state.exiting) {
+          return;
+        }
         if (state.settingsOpen) {
           closeSettingsPanel();
           return;
@@ -997,6 +1153,9 @@
       });
 
       widget.addEventListener("pointermove", function (event) {
+        if (state.exiting) {
+          return;
+        }
         if (!state.dragging || state.pointerId !== event.pointerId) {
           return;
         }
@@ -1017,6 +1176,9 @@
       });
 
       function stopDrag(event) {
+        if (state.exiting) {
+          return;
+        }
         if (!state.dragging || state.pointerId !== event.pointerId) {
           return;
         }
@@ -1052,3 +1214,4 @@
   </script>
 </body>
 </html>
+
