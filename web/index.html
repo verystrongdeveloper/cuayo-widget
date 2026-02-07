@@ -503,6 +503,7 @@
             })
             .then(function (isEaten) {
               if (isEaten) {
+                state.desktopAutoMoveLockUntil = Date.now() + 120;
                 if (state.sulking) {
                   state.sulking = false;
                   setExpression(smileExpressionIndex >= 0 ? smileExpressionIndex : 0, false);
@@ -510,6 +511,9 @@
                 } else {
                   playVoice("I like pumpkin.WAV");
                 }
+                moveDesktopWindowRandomX().catch(function () {
+                  // Ignore movement failures and let wander loop continue.
+                });
               }
             })
             .catch(function () {
@@ -1287,4 +1291,3 @@
   </script>
 </body>
 </html>
-
