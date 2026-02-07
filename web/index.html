@@ -39,6 +39,77 @@
       user-select: none;
     }
 
+    .settings-panel {
+      position: fixed;
+      min-width: 190px;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(17, 24, 39, 0.15);
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 14px 30px rgba(0, 0, 0, 0.2);
+      z-index: 30;
+      user-select: none;
+    }
+
+    .settings-title {
+      margin: 0 0 8px;
+      color: #111827;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .settings-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .settings-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: #111827;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .settings-value {
+      font-variant-numeric: tabular-nums;
+      color: #374151;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .settings-range {
+      width: 100%;
+      accent-color: #4f46e5;
+    }
+
+    .settings-button {
+      width: 100%;
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      text-align: left;
+      color: #111827;
+      background: #eef2ff;
+      cursor: pointer;
+    }
+
+    .settings-button:hover {
+      background: #e0e7ff;
+    }
+
+    .settings-button.secondary {
+      background: #f3f4f6;
+    }
+
+    .settings-button.secondary:hover {
+      background: #e5e7eb;
+    }
+
     .desktop-widget-mode .guide {
       display: none;
     }
@@ -179,9 +250,20 @@
 </head>
 <body>
   <main class="stage">
-    <div class="guide">Click Speaki: next mood + voice. Right-click: random mood.</div>
+    <div class="guide">Click Speaki: next mood + voice. Right-click: open settings.</div>
     <div id="speakiWidget" class="speaki-widget" aria-label="Speaki widget">
       <img src="./images/speaki_smile.png" alt="Speaki character" draggable="false" />
+    </div>
+    <div id="settingsPanel" class="settings-panel" role="dialog" aria-label="Speaki settings" aria-hidden="true" hidden>
+      <p class="settings-title">Speaki Settings</p>
+      <div class="settings-actions">
+        <div class="settings-row">
+          <span>Character size</span>
+          <span id="settingsSizeValue" class="settings-value">280px</span>
+        </div>
+        <input id="settingsSizeRange" class="settings-range" type="range" min="140" max="420" step="10" value="280" />
+        <button id="settingsCloseButton" type="button" class="settings-button secondary">Close</button>
+      </div>
     </div>
   </main>
 
@@ -190,9 +272,17 @@
       const widget = document.getElementById("speakiWidget");
       const sprite = widget.querySelector("img");
       const guide = document.querySelector(".guide");
+      const settingsPanel = document.getElementById("settingsPanel");
+      const settingsSizeRange = document.getElementById("settingsSizeRange");
+      const settingsSizeValue = document.getElementById("settingsSizeValue");
+      const settingsCloseButton = document.getElementById("settingsCloseButton");
       const storageKey = "speaki-widget-position-v1";
+      const sizeStorageKey = "speaki-widget-size-v1";
       const margin = 8;
       const isTauriDesktop = Boolean(window.__TAURI_INTERNALS__);
+      const defaultWidgetWidth = isTauriDesktop ? 320 : 280;
+      const minWidgetWidth = 140;
+      const maxWidgetWidth = isTauriDesktop ? 320 : 420;
       const expressions = [
         {
           id: "smile",
@@ -258,7 +348,8 @@
         desktopTargetX: null,
         desktopTargetY: null,
         desktopDragArmed: false,
-        desktopDragHoldTimer: null
+        desktopDragHoldTimer: null,
+        settingsOpen: false
       };
       let expressionIndex = 0;
       let activeAudio = null;
@@ -358,8 +449,113 @@
         setExpression(expressionIndex + 1, shouldPlayVoice);
       }
 
-      function randomExpression(shouldPlayVoice) {
-        setExpression(Math.floor(Math.random() * expressions.length), shouldPlayVoice);
+      function currentWidgetWidth() {
+        const styledWidth = parseFloat(widget.style.width);
+        if (Number.isFinite(styledWidth) && styledWidth > 0) {
+          return styledWidth;
+        }
+
+        const rect = widget.getBoundingClientRect();
+        return rect.width > 0 ? rect.width : defaultWidgetWidth;
+      }
+
+      function widgetSizeBounds() {
+        const viewportMax = Math.max(minWidgetWidth, Math.floor(window.innerWidth - margin * 2));
+        return {
+          min: minWidgetWidth,
+          max: Math.max(minWidgetWidth, Math.min(maxWidgetWidth, viewportMax))
+        };
+      }
+
+      function updateSizeControl(width) {
+        if (!settingsSizeRange || !settingsSizeValue) {
+          return;
+        }
+
+        const sizeBounds = widgetSizeBounds();
+        const safeWidth = clamp(Math.round(width), sizeBounds.min, sizeBounds.max);
+        settingsSizeRange.min = String(sizeBounds.min);
+        settingsSizeRange.max = String(sizeBounds.max);
+        settingsSizeRange.value = String(safeWidth);
+        settingsSizeValue.textContent = safeWidth + "px";
+      }
+
+      function applyWidgetSize(rawWidth, options) {
+        const opts = options || {};
+        const sizeBounds = widgetSizeBounds();
+        const safeWidth = clamp(Math.round(rawWidth), sizeBounds.min, sizeBounds.max);
+        widget.style.width = safeWidth + "px";
+        updateSizeControl(safeWidth);
+
+        if (opts.persistSize) {
+          localStorage.setItem(sizeStorageKey, String(safeWidth));
+        }
+
+        if (opts.adjustPosition && !isTauriDesktop) {
+          const pos = currentPosition();
+          setPosition(pos.x, pos.y);
+          if (opts.persistPosition) {
+            savePosition();
+          }
+        }
+      }
+
+      function loadWidgetSize() {
+        let nextWidth = defaultWidgetWidth;
+
+        try {
+          const raw = localStorage.getItem(sizeStorageKey);
+          if (raw !== null) {
+            const parsed = Number(raw);
+            if (Number.isFinite(parsed) && parsed > 0) {
+              nextWidth = parsed;
+            }
+          }
+        } catch (_error) {
+          nextWidth = defaultWidgetWidth;
+        }
+
+        applyWidgetSize(nextWidth, {
+          persistSize: false,
+          adjustPosition: false
+        });
+      }
+
+      function closeSettingsPanel() {
+        if (!settingsPanel || settingsPanel.hidden) {
+          return;
+        }
+        settingsPanel.hidden = true;
+        settingsPanel.setAttribute("aria-hidden", "true");
+        state.settingsOpen = false;
+      }
+
+      function openSettingsPanel(clientX, clientY) {
+        if (!settingsPanel) {
+          return;
+        }
+
+        settingsPanel.hidden = false;
+        settingsPanel.setAttribute("aria-hidden", "false");
+
+        const rect = settingsPanel.getBoundingClientRect();
+        const preferredX = typeof clientX === "number" ? clientX + 8 : margin;
+        const preferredY = typeof clientY === "number" ? clientY + 8 : margin;
+        const safeX = clamp(
+          preferredX,
+          margin,
+          Math.max(margin, window.innerWidth - rect.width - margin)
+        );
+        const safeY = clamp(
+          preferredY,
+          margin,
+          Math.max(margin, window.innerHeight - rect.height - margin)
+        );
+
+        settingsPanel.style.left = safeX + "px";
+        settingsPanel.style.top = safeY + "px";
+        updateSizeControl(currentWidgetWidth());
+        state.settingsOpen = true;
       }
 
       function queueDesktopWindowMove(x, y) {
@@ -437,6 +633,10 @@
       }
 
       async function moveDesktopWindowRandomX() {
+        if (state.settingsOpen) {
+          return;
+        }
+
         const geometry = await invokeTauri("get_window_geometry");
         const maxX = geometry.monitor_x + Math.max(0, geometry.monitor_width - geometry.width);
         const minX = geometry.monitor_x;
@@ -513,7 +713,7 @@
           const nextWait = Math.round(1100 + Math.random() * 2600);
           await wait(nextWait);
 
-          if (state.dragging || Date.now() < state.desktopAutoMoveLockUntil) {
+          if (state.settingsOpen || state.dragging || Date.now() < state.desktopAutoMoveLockUntil) {
             continue;
           }
 
@@ -537,6 +737,7 @@
       });
 
       widget.addEventListener("click", function () {
+        closeSettingsPanel();
         if (state.dragging) {
           return;
         }
@@ -555,17 +756,59 @@
         if (state.dragging) {
           return;
         }
-        randomExpression(true);
+        openSettingsPanel(event.clientX, event.clientY);
+        setGuide("Settings opened.");
+      });
+
+      if (settingsSizeRange) {
+        settingsSizeRange.addEventListener("input", function () {
+          const targetWidth = Number(settingsSizeRange.value);
+          if (!Number.isFinite(targetWidth)) {
+            return;
+          }
+
+          applyWidgetSize(targetWidth, {
+            persistSize: true,
+            adjustPosition: !isTauriDesktop,
+            persistPosition: !isTauriDesktop
+          });
+        });
+      }
+
+      if (settingsCloseButton) {
+        settingsCloseButton.addEventListener("click", closeSettingsPanel);
+      }
+
+      document.addEventListener("pointerdown", function (event) {
+        if (!state.settingsOpen || !settingsPanel) {
+          return;
+        }
+        if (settingsPanel.contains(event.target)) {
+          return;
+        }
+        closeSettingsPanel();
+      });
+
+      window.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+          closeSettingsPanel();
+        }
       });
 
       setExpression(0, false);
+      loadWidgetSize();
 
       if (isTauriDesktop) {
         document.body.classList.add("desktop-widget-mode");
-        setGuide("Desktop mode: free drag + random horizontal movement.");
+        setGuide("Desktop mode: drag + auto movement. Right-click for settings.");
         state.desktopAutoMoveLockUntil = Date.now() + 1500;
 
         widget.addEventListener("pointerdown", function (event) {
+          if (state.settingsOpen) {
+            closeSettingsPanel();
+            return;
+          }
+
           if (event.button !== 0 && event.pointerType !== "touch") {
             return;
           }
@@ -672,7 +915,7 @@
       }
 
       widget.classList.add("browser-draggable");
-      setGuide("Browser mode. Drag to move, double-click to reset, click to change mood.");
+      setGuide("Browser mode. Drag to move, click mood, right-click settings.");
 
       function bounds() {
         return {
@@ -733,6 +976,11 @@
       });
 
       widget.addEventListener("pointerdown", function (event) {
+        if (state.settingsOpen) {
+          closeSettingsPanel();
+          return;
+        }
+
         if (event.button !== 0 && event.pointerType !== "touch") {
           return;
         }
@@ -790,6 +1038,10 @@
       widget.addEventListener("dblclick", resetToDefault);
 
       window.addEventListener("resize", function () {
+        applyWidgetSize(currentWidgetWidth(), {
+          persistSize: false,
+          adjustPosition: false
+        });
         const pos = currentPosition();
         setPosition(pos.x, pos.y);
         savePosition();
