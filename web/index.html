@@ -463,7 +463,20 @@
         playVoice("eww.WAV");
       }
 
-      function startPumpkinEatPolling() {
+      function onPumpkinTimeout() {
+        clearDesktopDragHoldTimer();
+        state.dragging = false;
+        state.desktopPointerDown = false;
+        state.desktopDragArmed = false;
+        setDraggingVisual(false);
+        if (forcedDragExpressionIndex >= 0) {
+          setExpression(forcedDragExpressionIndex, false);
+        }
+        playVoice(randomItem(dragVoices));
+        setGuide("Pumpkin miss... Speaki is crying.");
+      }
+
+      function startPumpkinEventPolling() {
         if (!isTauriDesktop) {
           return;
         }
@@ -475,7 +488,14 @@
           }
 
           pollBusy = true;
-          invokeTauri("take_pumpkin_eaten_flag")
+          invokeTauri("take_pumpkin_timeout_flag")
+            .then(function (isTimedOut) {
+              if (isTimedOut) {
+                onPumpkinTimeout();
+                return false;
+              }
+              return invokeTauri("take_pumpkin_eaten_flag");
+            })
             .then(function (isEaten) {
               if (isEaten) {
                 playVoice("I like pumpkin.WAV");
@@ -1104,7 +1124,7 @@
           state.desktopPointerDown = false;
           finishDesktopDrag();
         });
-        startPumpkinEatPolling();
+        startPumpkinEventPolling();
         startDesktopHorizontalWander();
         return;
       }

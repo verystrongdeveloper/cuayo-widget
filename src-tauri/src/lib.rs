@@ -10,6 +10,9 @@ static PUMPKIN_DRAGGING: OnceLock<Mutex<bool>> = OnceLock::new();
 static FOLLOW_PHASE: OnceLock<Mutex<u8>> = OnceLock::new();
 static FOLLOW_WORKER_RUNNING: OnceLock<Mutex<bool>> = OnceLock::new();
 static PUMPKIN_EATEN_PENDING: OnceLock<Mutex<bool>> = OnceLock::new();
+static PUMPKIN_TIMEOUT_PENDING: OnceLock<Mutex<bool>> = OnceLock::new();
+static PUMPKIN_SESSION_ID: OnceLock<Mutex<u64>> = OnceLock::new();
+static PUMPKIN_CHASE_TIMED_OUT: OnceLock<Mutex<bool>> = OnceLock::new();
 
 fn pumpkin_dragging_state() -> &'static Mutex<bool> {
   PUMPKIN_DRAGGING.get_or_init(|| Mutex::new(false))
@@ -27,6 +30,18 @@ fn pumpkin_eaten_pending_state() -> &'static Mutex<bool> {
   PUMPKIN_EATEN_PENDING.get_or_init(|| Mutex::new(false))
 }
 
+fn pumpkin_timeout_pending_state() -> &'static Mutex<bool> {
+  PUMPKIN_TIMEOUT_PENDING.get_or_init(|| Mutex::new(false))
+}
+
+fn pumpkin_session_id_state() -> &'static Mutex<u64> {
+  PUMPKIN_SESSION_ID.get_or_init(|| Mutex::new(0))
+}
+
+fn pumpkin_chase_timed_out_state() -> &'static Mutex<bool> {
+  PUMPKIN_CHASE_TIMED_OUT.get_or_init(|| Mutex::new(false))
+}
+
 fn set_pumpkin_dragging_state(is_dragging: bool) {
   if let Ok(mut dragging) = pumpkin_dragging_state().lock() {
     *dragging = is_dragging;
@@ -40,11 +55,101 @@ fn is_pumpkin_dragging() -> bool {
     .unwrap_or(false)
 }
 
-fn on_pumpkin_eaten() {
+fn set_pumpkin_chase_timed_out(is_timed_out: bool) {
+  if let Ok(mut timed_out) = pumpkin_chase_timed_out_state().lock() {
+    *timed_out = is_timed_out;
+  }
+}
+
+fn is_pumpkin_chase_timed_out() -> bool {
+  pumpkin_chase_timed_out_state()
+    .lock()
+    .map(|timed_out| *timed_out)
+    .unwrap_or(false)
+}
+
+fn clear_pumpkin_timeout_pending() {
+  if let Ok(mut pending) = pumpkin_timeout_pending_state().lock() {
+    *pending = false;
+  }
+}
+
+fn mark_pumpkin_timeout_pending() {
+  if let Ok(mut pending) = pumpkin_timeout_pending_state().lock() {
+    *pending = true;
+  }
+}
+
+fn take_pumpkin_timeout_pending() -> bool {
+  if let Ok(mut pending) = pumpkin_timeout_pending_state().lock() {
+    let was_pending = *pending;
+    *pending = false;
+    return was_pending;
+  }
+  false
+}
+
+fn next_pumpkin_session_id() -> u64 {
+  if let Ok(mut session_id) = pumpkin_session_id_state().lock() {
+    *session_id = session_id.saturating_add(1);
+    return *session_id;
+  }
+  0
+}
+
+fn current_pumpkin_session_id() -> u64 {
+  pumpkin_session_id_state()
+    .lock()
+    .map(|session_id| *session_id)
+    .unwrap_or(0)
+}
+
+fn invalidate_pumpkin_session() {
+  let _ = next_pumpkin_session_id();
+}
+
+fn on_pumpkin_timeout() {
   set_pumpkin_dragging_state(false);
   if let Ok(mut phase) = follow_phase_state().lock() {
     *phase = 0;
   }
+  set_pumpkin_chase_timed_out(true);
+  mark_pumpkin_timeout_pending();
+}
+
+fn start_pumpkin_timeout_worker<R: tauri::Runtime>(app: tauri::AppHandle<R>, session_id: u64) {
+  thread::spawn(move || {
+    thread::sleep(Duration::from_secs(5));
+
+    if current_pumpkin_session_id() != session_id {
+      return;
+    }
+    if app.get_webview_window("pumpkin").is_none() {
+      return;
+    }
+
+    on_pumpkin_timeout();
+  });
+}
+
+fn begin_pumpkin_session<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+  if let Ok(mut pending) = pumpkin_eaten_pending_state().lock() {
+    *pending = false;
+  }
+  clear_pumpkin_timeout_pending();
+  set_pumpkin_chase_timed_out(false);
+  let session_id = next_pumpkin_session_id();
+  start_pumpkin_timeout_worker(app, session_id);
+}
+
+fn on_pumpkin_eaten() {
+  invalidate_pumpkin_session();
+  set_pumpkin_dragging_state(false);
+  if let Ok(mut phase) = follow_phase_state().lock() {
+    *phase = 0;
+  }
+  set_pumpkin_chase_timed_out(false);
+  clear_pumpkin_timeout_pending();
   if let Ok(mut pending) = pumpkin_eaten_pending_state().lock() {
     *pending = true;
   }
@@ -107,7 +212,7 @@ fn try_start_follow_worker<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
 fn start_drag(window: Window) -> Result<(), String> {
   window.start_dragging().map_err(|error| error.to_string())?;
 
-  if window.label() == "pumpkin" {
+  if window.label() == "pumpkin" && !is_pumpkin_chase_timed_out() {
     set_pumpkin_dragging_state(true);
     try_start_follow_worker(window.app_handle().clone());
   }
@@ -330,6 +435,10 @@ fn walk_window_to(
   initial_pumpkin_y: i32,
   pumpkin_label: &str,
 ) -> Result<bool, String> {
+  if is_pumpkin_chase_timed_out() {
+    return Ok(false);
+  }
+
   let delta_x = target_x - start_x;
   let delta_y = target_y - start_y;
   let distance = ((delta_x as f64).powi(2) + (delta_y as f64).powi(2)).sqrt();
@@ -348,6 +457,9 @@ fn walk_window_to(
   let wobble_amp = if distance < 180.0 { 1.3 } else { 2.0 };
 
   for step in 1..=steps {
+    if is_pumpkin_chase_timed_out() {
+      return Ok(false);
+    }
     if is_pumpkin_dragging() {
       return Ok(false);
     }
@@ -380,6 +492,10 @@ fn walk_window_to(
     let edge_slow = (1.0 - (std::f64::consts::PI * t).sin()).max(0.0);
     let delay_ms = 8.0 + edge_slow * 4.0;
     thread::sleep(Duration::from_millis(delay_ms.round() as u64));
+  }
+
+  if is_pumpkin_chase_timed_out() {
+    return Ok(false);
   }
 
   window
@@ -470,6 +586,8 @@ async fn spawn_pumpkin(window: Window) -> Result<bool, String> {
     .build()
     .map_err(|error| error.to_string())?;
 
+  begin_pumpkin_session(window.app_handle().clone());
+
   let main_size = window.outer_size().map_err(|error| error.to_string())?;
   let main_width = main_size.width as i32;
   let main_height = main_size.height as i32;
@@ -515,6 +633,10 @@ fn follow_main_toward_pumpkin_windows<R: tauri::Runtime>(
   const PUMPKIN_GAP: i32 = 0;
   const FOLLOW_RATIO: f64 = 0.18;
   const MAX_STEP: i32 = 8;
+
+  if is_pumpkin_chase_timed_out() {
+    return Ok(());
+  }
 
   let pumpkin_pos = pumpkin_window.outer_position().map_err(|error| error.to_string())?;
   let pumpkin_size = pumpkin_window.outer_size().map_err(|error| error.to_string())?;
@@ -608,6 +730,9 @@ fn follow_main_toward_pumpkin_windows<R: tauri::Runtime>(
 
 #[tauri::command]
 fn start_pumpkin_drag(window: Window) {
+  if is_pumpkin_chase_timed_out() {
+    return;
+  }
   set_pumpkin_dragging_state(true);
   try_start_follow_worker(window.app_handle().clone());
 }
@@ -623,6 +748,11 @@ fn stop_pumpkin_drag() {
 #[tauri::command]
 fn take_pumpkin_eaten_flag() -> bool {
   take_pumpkin_eaten_pending()
+}
+
+#[tauri::command]
+fn take_pumpkin_timeout_flag() -> bool {
+  take_pumpkin_timeout_pending()
 }
 
 #[tauri::command]
@@ -642,6 +772,7 @@ pub fn run() {
       start_pumpkin_drag,
       stop_pumpkin_drag,
       take_pumpkin_eaten_flag,
+      take_pumpkin_timeout_flag,
       exit_app
     ])
     .on_page_load(|window, payload| {
