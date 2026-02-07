@@ -263,6 +263,7 @@
       const forcedDragExpressionIndex = expressions.findIndex(function (expression) {
         return expression.id === "crying";
       });
+      const dragVoices = ["eww.WAV", "eww2.WAV"];
 
       function assetPath(folder, fileName) {
         return "./" + folder + "/" + encodeURIComponent(fileName);
@@ -326,6 +327,10 @@
         activeAudio.play().catch(function () {
           setGuide("Audio blocked by system. Click Speaki again.");
         });
+      }
+
+      function playDragVoice() {
+        playVoice(randomItem(dragVoices));
       }
 
       function setExpression(nextIndex, shouldPlayVoice) {
@@ -599,6 +604,9 @@
             return;
           }
 
+          if (!state.moved) {
+            playDragVoice();
+          }
           state.moved = true;
           state.dragging = true;
           if (!state.desktopWindowReady) {
@@ -726,6 +734,7 @@
         setFacingByDelta(signedDeltaX);
         if (deltaX > 5 || deltaY > 5) {
           if (!state.moved) {
+            playDragVoice();
             setDraggingVisual(true);
           }
           state.moved = true;
