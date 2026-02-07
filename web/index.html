@@ -895,9 +895,13 @@
           }
 
           if (isTauriDesktop) {
+            closeSettingsPanel();
             invokeTauri("spawn_pumpkin")
-              .then(function () {
-                closeSettingsPanel();
+              .then(function (touchedPumpkin) {
+                state.desktopAutoMoveLockUntil = Date.now() + 300000;
+                if (touchedPumpkin) {
+                  playVoice("I like pumpkin.WAV");
+                }
               })
               .catch(function () {
                 setGuide("Pumpkin spawn failed.");
