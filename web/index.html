@@ -397,6 +397,7 @@
       let desktopFacingTrackTimer = null;
       let desktopLastWindowX = null;
       let hungerDrainTimer = null;
+      let eatingExpressionTimer = null;
       const desktopDragHoldMs = 260;
       const hungerDrainTickMs = 6000;
       const forcedDragExpressionIndex = expressions.findIndex(function (expression) {
@@ -413,6 +414,9 @@
       });
       const crying3ExpressionIndex = expressions.findIndex(function (expression) {
         return expression.id === "crying3";
+      });
+      const eatingExpressionIndex = expressions.findIndex(function (expression) {
+        return expression.id === "eating";
       });
       const dragVoices = ["eww.WAV", "eww2.WAV"];
       const satiatedClickVoices = [
@@ -528,6 +532,27 @@
         if (targetIndex !== expressionIndex) {
           setExpression(targetIndex, false);
         }
+      }
+
+      function clearEatingExpressionTimer() {
+        if (eatingExpressionTimer !== null) {
+          window.clearTimeout(eatingExpressionTimer);
+          eatingExpressionTimer = null;
+        }
+      }
+
+      function showEatingExpressionBriefly() {
+        clearEatingExpressionTimer();
+        if (eatingExpressionIndex < 0) {
+          applyHungerDefaultExpression();
+          return;
+        }
+
+        setExpression(eatingExpressionIndex, false);
+        eatingExpressionTimer = window.setTimeout(function () {
+          eatingExpressionTimer = null;
+          applyHungerDefaultExpression();
+        }, 520);
       }
 
       function stopDesktopFacingTracking() {
@@ -670,6 +695,7 @@
       }
 
       function onPumpkinTimeout() {
+        clearEatingExpressionTimer();
         clearDesktopDragHoldTimer();
         state.dragging = false;
         state.desktopPointerDown = false;
@@ -715,7 +741,7 @@
                 } else {
                   playVoice("I like pumpkin.WAV");
                 }
-                applyHungerDefaultExpression();
+                showEatingExpressionBriefly();
                 moveDesktopWindowRandomX().catch(function () {
                   // Ignore movement failures and let wander loop continue.
                 });
@@ -912,6 +938,7 @@
         }
 
         state.exiting = true;
+        clearEatingExpressionTimer();
         saveHunger();
         stopHungerDrain();
         stopDesktopFacingTracking();
