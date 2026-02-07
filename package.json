@@ -1,6 +1,6 @@
 {
   "name": "cuayo-widget",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "web:dev": "http-server ./web -a 127.0.0.1 -p 1420 -c-1 --silent",
