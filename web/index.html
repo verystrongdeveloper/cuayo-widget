@@ -403,9 +403,26 @@
         return expression.id === "crying";
       });
       const smileExpressionIndex = expressions.findIndex(function (expression) {
-        return expression.id === "smile2";
+        return expression.id === "smile";
+      });
+      const cryingExpressionIndex = expressions.findIndex(function (expression) {
+        return expression.id === "crying";
+      });
+      const crying2ExpressionIndex = expressions.findIndex(function (expression) {
+        return expression.id === "crying2";
+      });
+      const crying3ExpressionIndex = expressions.findIndex(function (expression) {
+        return expression.id === "crying3";
       });
       const dragVoices = ["eww.WAV", "eww2.WAV"];
+      const satiatedClickVoices = [
+        "clean.WAV",
+        "kakurenbo.WAV",
+        "like.WAV",
+        "like2.WAV",
+        "like3.WAV",
+        "speeky.WAV"
+      ];
 
       function assetPath(folder, fileName) {
         return "./" + folder + "/" + encodeURIComponent(fileName);
@@ -465,6 +482,7 @@
           state.hunger = 100;
         }
         updateHungerDisplay();
+        applyHungerDefaultExpression();
       }
 
       function stopHungerDrain() {
@@ -484,7 +502,32 @@
           state.hunger = Math.max(0, state.hunger - 1);
           updateHungerDisplay();
           saveHunger();
+          applyHungerDefaultExpression();
         }, hungerDrainTickMs);
+      }
+
+      function hungerDefaultExpressionIndex() {
+        if (state.hunger <= 10 && crying3ExpressionIndex >= 0) {
+          return crying3ExpressionIndex;
+        }
+        if (state.hunger <= 30 && cryingExpressionIndex >= 0) {
+          return cryingExpressionIndex;
+        }
+        if (state.hunger <= 50 && crying2ExpressionIndex >= 0) {
+          return crying2ExpressionIndex;
+        }
+        return smileExpressionIndex >= 0 ? smileExpressionIndex : 0;
+      }
+
+      function applyHungerDefaultExpression() {
+        if (state.exiting || state.sulking || state.dragging || state.dragExpressionIndex !== null) {
+          return;
+        }
+
+        const targetIndex = hungerDefaultExpressionIndex();
+        if (targetIndex !== expressionIndex) {
+          setExpression(targetIndex, false);
+        }
       }
 
       function stopDesktopFacingTracking() {
@@ -617,6 +660,15 @@
         playVoice("eww.WAV");
       }
 
+      function playClickVoiceByHunger() {
+        if (state.hunger <= 50) {
+          playVoice("don't push.WAV");
+          return;
+        }
+
+        playVoice(randomItem(satiatedClickVoices));
+      }
+
       function onPumpkinTimeout() {
         clearDesktopDragHoldTimer();
         state.dragging = false;
@@ -659,11 +711,11 @@
                 saveHunger();
                 if (state.sulking) {
                   state.sulking = false;
-                  setExpression(smileExpressionIndex >= 0 ? smileExpressionIndex : 0, false);
                   playVoice("like3.WAV");
                 } else {
                   playVoice("I like pumpkin.WAV");
                 }
+                applyHungerDefaultExpression();
                 moveDesktopWindowRandomX().catch(function () {
                   // Ignore movement failures and let wander loop continue.
                 });
@@ -1081,7 +1133,7 @@
         if (Date.now() < state.suppressClickUntil) {
           return;
         }
-        nextExpression(true);
+        playClickVoiceByHunger();
       });
 
       widget.addEventListener("contextmenu", function (event) {
