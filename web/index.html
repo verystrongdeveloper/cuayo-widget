@@ -387,6 +387,8 @@
       let expressionIndex = 0;
       let activeAudio = null;
       let dragFlipTimer = null;
+      let desktopFacingTrackTimer = null;
+      let desktopLastWindowX = null;
       const desktopDragHoldMs = 260;
       const forcedDragExpressionIndex = expressions.findIndex(function (expression) {
         return expression.id === "crying";
@@ -421,6 +423,65 @@
         return new Promise(function (resolve) {
           window.setTimeout(resolve, ms);
         });
+      }
+
+      function stopDesktopFacingTracking() {
+        if (desktopFacingTrackTimer !== null) {
+          window.clearInterval(desktopFacingTrackTimer);
+          desktopFacingTrackTimer = null;
+        }
+        desktopLastWindowX = null;
+      }
+
+      function startDesktopFacingTracking() {
+        if (!isTauriDesktop) {
+          return;
+        }
+
+        stopDesktopFacingTracking();
+        let pollBusy = false;
+
+        invokeTauri("get_window_geometry")
+          .then(function (geometry) {
+            if (geometry && Number.isFinite(geometry.x)) {
+              desktopLastWindowX = geometry.x;
+            }
+          })
+          .catch(function () {
+            // Ignore initial geometry failure.
+          });
+
+        desktopFacingTrackTimer = window.setInterval(function () {
+          if (pollBusy || state.exiting || state.dragging || state.desktopPointerDown || widget.classList.contains("dragging")) {
+            return;
+          }
+
+          pollBusy = true;
+          invokeTauri("get_window_geometry")
+            .then(function (geometry) {
+              if (!geometry || !Number.isFinite(geometry.x)) {
+                return;
+              }
+
+              const currentX = geometry.x;
+              if (desktopLastWindowX === null) {
+                desktopLastWindowX = currentX;
+                return;
+              }
+
+              const deltaX = currentX - desktopLastWindowX;
+              desktopLastWindowX = currentX;
+              if (Math.abs(deltaX) >= 1) {
+                setFacingByDelta(deltaX);
+              }
+            })
+            .catch(function () {
+              // Ignore intermittent geometry failures.
+            })
+            .finally(function () {
+              pollBusy = false;
+            });
+        }, 90);
       }
 
       function setFacingByDelta(deltaX) {
@@ -734,6 +795,7 @@
         }
 
         state.exiting = true;
+        stopDesktopFacingTracking();
         state.settingsOpen = false;
         closeSettingsPanel();
         clearDesktopDragHoldTimer();
@@ -1051,6 +1113,7 @@
         document.body.classList.add("desktop-widget-mode");
         setGuide("Desktop mode: drag + auto movement. Right-click for settings.");
         state.desktopAutoMoveLockUntil = Date.now() + 1500;
+        startDesktopFacingTracking();
 
         widget.addEventListener("pointerdown", function (event) {
           if (state.exiting) {
