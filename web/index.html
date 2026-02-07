@@ -95,6 +95,15 @@
       transition: transform 120ms linear;
     }
 
+    .speaki-widget.dragging img {
+      transition: none;
+      animation: drag-flail-right 150ms ease-in-out infinite;
+    }
+
+    .speaki-widget.dragging.facing-left img {
+      animation-name: drag-flail-left;
+    }
+
     .speaki-widget.facing-left img {
       transform: scaleX(-1);
     }
@@ -130,12 +139,48 @@
         transform: translateY(0) scale(1);
       }
     }
+
+    @keyframes drag-flail-right {
+      0% {
+        transform: translateY(0) rotate(0deg);
+      }
+      25% {
+        transform: translateY(-3px) rotate(-9deg);
+      }
+      50% {
+        transform: translateY(2px) rotate(8deg);
+      }
+      75% {
+        transform: translateY(-2px) rotate(-8deg);
+      }
+      100% {
+        transform: translateY(0) rotate(0deg);
+      }
+    }
+
+    @keyframes drag-flail-left {
+      0% {
+        transform: scaleX(-1) translateY(0) rotate(0deg);
+      }
+      25% {
+        transform: scaleX(-1) translateY(-3px) rotate(9deg);
+      }
+      50% {
+        transform: scaleX(-1) translateY(2px) rotate(-8deg);
+      }
+      75% {
+        transform: scaleX(-1) translateY(-2px) rotate(8deg);
+      }
+      100% {
+        transform: scaleX(-1) translateY(0) rotate(0deg);
+      }
+    }
   </style>
 </head>
 <body>
   <main class="stage">
     <div class="guide">Click Speaki: next mood + voice. Right-click: random mood.</div>
-    <div id="speakiWidget" class="speaki-widget" data-tauri-drag-region aria-label="Speaki widget">
+    <div id="speakiWidget" class="speaki-widget" aria-label="Speaki widget">
       <img src="./images/speaki_smile.png" alt="Speaki character" draggable="false" />
     </div>
   </main>
@@ -197,6 +242,7 @@
         pointerId: null,
         dragOffsetX: 0,
         dragOffsetY: 0,
+        dragExpressionIndex: null,
         startX: 0,
         startY: 0,
         moved: false,
@@ -205,6 +251,9 @@
       };
       let expressionIndex = 0;
       let activeAudio = null;
+      const forcedDragExpressionIndex = expressions.findIndex(function (expression) {
+        return expression.id === "crying";
+      });
 
       function assetPath(folder, fileName) {
         return "./" + folder + "/" + encodeURIComponent(fileName);
@@ -295,6 +344,28 @@
         });
       }
 
+      function setDraggingVisual(isDragging) {
+        if (isDragging) {
+          widget.classList.add("dragging");
+          if (state.dragExpressionIndex === null) {
+            state.dragExpressionIndex = expressionIndex;
+          }
+          if (
+            forcedDragExpressionIndex >= 0 &&
+            expressionIndex !== forcedDragExpressionIndex
+          ) {
+            setExpression(forcedDragExpressionIndex, false);
+          }
+          return;
+        }
+
+        widget.classList.remove("dragging");
+        if (state.dragExpressionIndex !== null) {
+          setExpression(state.dragExpressionIndex, false);
+          state.dragExpressionIndex = null;
+        }
+      }
+
       async function moveDesktopWindowRandomX() {
         const geometry = await invokeTauri("get_window_geometry");
         const maxX = geometry.monitor_x + Math.max(0, geometry.monitor_width - geometry.width);
@@ -328,7 +399,7 @@
         let stepCount = 0;
         let hop = null;
         while (Math.abs(targetX - currentX) > 0) {
-          if (Date.now() < state.desktopAutoMoveLockUntil) {
+          if (state.dragging || Date.now() < state.desktopAutoMoveLockUntil) {
             return;
           }
 
@@ -372,7 +443,7 @@
           const nextWait = Math.round(1100 + Math.random() * 2600);
           await wait(nextWait);
 
-          if (Date.now() < state.desktopAutoMoveLockUntil) {
+          if (state.dragging || Date.now() < state.desktopAutoMoveLockUntil) {
             continue;
           }
 
@@ -396,6 +467,9 @@
       });
 
       widget.addEventListener("click", function () {
+        if (state.dragging) {
+          return;
+        }
         if (Date.now() < state.suppressClickUntil) {
           return;
         }
@@ -404,6 +478,9 @@
 
       widget.addEventListener("contextmenu", function (event) {
         event.preventDefault();
+        if (state.dragging) {
+          return;
+        }
         randomExpression(true);
       });
 
@@ -419,6 +496,7 @@
             return;
           }
 
+          state.dragging = false;
           state.pointerId = event.pointerId;
           state.startX = event.clientX;
           state.startY = event.clientY;
@@ -440,19 +518,27 @@
           }
 
           state.moved = true;
+          state.dragging = true;
+          setDraggingVisual(true);
           state.suppressClickUntil = Date.now() + 250;
           startDesktopDrag();
         });
 
-        function clearDesktopPointer(event) {
+        function stopDesktopDrag(event) {
           if (state.pointerId !== event.pointerId) {
             return;
           }
+
+          if (state.dragging) {
+            state.dragging = false;
+            setDraggingVisual(false);
+          }
           state.pointerId = null;
+          state.desktopAutoMoveLockUntil = Date.now() + 1200;
         }
 
-        widget.addEventListener("pointerup", clearDesktopPointer);
-        widget.addEventListener("pointercancel", clearDesktopPointer);
+        widget.addEventListener("pointerup", stopDesktopDrag);
+        widget.addEventListener("pointercancel", stopDesktopDrag);
         startDesktopHorizontalWander();
         return;
       }
@@ -532,7 +618,7 @@
         state.startY = event.clientY;
         state.moved = false;
 
-        widget.classList.add("dragging");
+        setDraggingVisual(true);
         widget.setPointerCapture(event.pointerId);
       });
 
@@ -559,8 +645,10 @@
 
         state.dragging = false;
         state.pointerId = null;
-        widget.classList.remove("dragging");
-        widget.releasePointerCapture(event.pointerId);
+        setDraggingVisual(false);
+        if (widget.hasPointerCapture(event.pointerId)) {
+          widget.releasePointerCapture(event.pointerId);
+        }
         if (state.moved) {
           state.suppressClickUntil = Date.now() + 150;
         }
