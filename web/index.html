@@ -654,6 +654,9 @@
             .then(function (isEaten) {
               if (isEaten) {
                 state.desktopAutoMoveLockUntil = Date.now() + 120;
+                state.hunger = Math.min(100, state.hunger + 10);
+                updateHungerDisplay();
+                saveHunger();
                 if (state.sulking) {
                   state.sulking = false;
                   setExpression(smileExpressionIndex >= 0 ? smileExpressionIndex : 0, false);
