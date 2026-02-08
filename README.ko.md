@@ -7,12 +7,12 @@ Cuayo widget은 Windows용 Tauri 기반 데스크톱 캐릭터 위젯입니다.
 - 투명한 항상-위(Always on top) 캐릭터 창
 - 우클릭 설정 패널 (크기, Pumpkin, Exit)
 - 호박 상호작용 (생성, 드래그, 추적, 먹기)
-- 배고픔 시스템
+- 호박 지수 시스템
   - 시작값 `100`
   - 시간 경과로 감소 (`분당 10`)
   - 호박 섭취 시 `+10` (최대 `100`)
-  - 배고픔 구간에 따른 표정/음성 반응
-- 배고픔 수치 로컬 스토리지 저장
+  - 호박 지수 구간에 따른 표정/음성 반응
+- 호박 지수 수치 로컬 스토리지 저장
 
 ## 기술 스택
 
@@ -44,7 +44,7 @@ npm run build
 빌드 산출물:
 
 - EXE: `src-tauri/target/release/app.exe`
-- MSI: `src-tauri/target/release/bundle/msi/Cuayo widget_1.0.0_x64_en-US.msi`
+- MSI: `src-tauri/target/release/bundle/msi/Cuayo widget_1.0.1_x64_en-US.msi`
 
 ## 프로젝트 구조
 
@@ -58,5 +58,8 @@ cuayo-widget/
 
 ## 버전
 
-현재 버전: `1.0.0`
+현재 버전: `1.0.1`
 
+### 1.0.1 업데이트
+
+- 사용자 표시 지표 명칭을 `배고픔`에서 `호박 지수`로 변경했습니다.
